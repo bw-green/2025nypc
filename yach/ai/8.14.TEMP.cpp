@@ -213,6 +213,7 @@ class Game {
         int amount = INIT_BID_BY_SIX[k];
         return Bid{group, capByRound(amount)};
     }
+
     // ---------- 2라운드 이상 ----------
     auto addPack = [](array<int,7> c, const vector<int>& p){
         for (int d : p) if (1<=d && d<=6) c[d]++;
@@ -488,114 +489,86 @@ auto allLowerUsed = [&](){
     return true;
 };
 
-// 가중치 기반 보충: base 를 5개가 될 때까지, 얼굴별 weight가 낮은 것부터 채움
 auto fillToFiveSmart = [&](vector<int> base, DiceRule target){
     array<int,7> tmp = C;
-    for (int d: base) { if(!(1<=d&&d<=6) || tmp[d]==0) return vector<int>{}; tmp[d]--; }
+
+    // base는 한 번만 차감!
+    for (int d : base) {
+        if (!(1<=d && d<=6) || tmp[d]==0) return vector<int>{};
+        tmp[d]--;
+    }
 
     auto upperUsed = [&](int f){ return myState.ruleScore[f-1] != -1; };
 
-    // 하단 전부 사용된 상태면: 이미 쓴 상단 얼굴 -> 남은 상단(작은눈부터) 순서로 채움
-    if (allLowerUsed()){
-        for (int f=6; f>=1 && (int)base.size()<5; --f)
-            if (upperUsed(f)) while(tmp[f]>0 && (int)base.size()<5){ base.push_back(f); tmp[f]--; }
-        for (int f=1; f<=6 && (int)base.size()<5; ++f)
-            if (!upperUsed(f)) while(tmp[f]>0 && (int)base.size()<5){ base.push_back(f); tmp[f]--; }
+    // ★★★ 하단(CHOICE~YACHT) 전부 사용된 상태 전용 규칙 ★★★
+    if (allLowerUsed()) {
+        // 1) 이미 사용한 상단 얼굴(가치 0)부터 최대 소모
+        for (int f = 6; f >= 1 && (int)base.size() < 5; --f) {
+            if (!upperUsed(f)) continue;
+            while (tmp[f] > 0 && (int)base.size() < 5) { base.push_back(f); tmp[f]--; }
+        }
+        // 2) 남으면 아직 안 쓴 상단 얼굴을 1부터(작은 눈 우선) 채움
+        for (int f = 1; f <= 6 && (int)base.size() < 5; ++f) {
+            if (upperUsed(f)) continue;
+            while (tmp[f] > 0 && (int)base.size() < 5) { base.push_back(f); tmp[f]--; }
+        }
+        // 안전망(이론상 도달 X)
+        if ((int)base.size() < 5) {
+            for (int f = 1; f <= 6 && (int)base.size() < 5; ++f)
+                while (tmp[f] > 0 && (int)base.size() < 5) { base.push_back(f); tmp[f]--; }
+        }
         return base;
     }
 
-    // 상황 플래그
-    int rulesLeft=0; for (int r=0;r<12;++r) if (myState.ruleScore[r]==-1) ++rulesLeft;
-    bool straightAlive = (myState.ruleScore[SMALL_STRAIGHT]==-1) || (myState.ruleScore[LARGE_STRAIGHT]==-1);
-    bool midLate       = (roundNo >= 7 || rulesLeft <= 6);
-    bool needOne       = (myState.ruleScore[ONE]==-1);
-    bool needTwo       = (myState.ruleScore[TWO]==-1);
-    bool needThree     = (myState.ruleScore[THREE]==-1);
-    bool needFour      = (myState.ruleScore[FOUR]==-1);
-    bool needFive      = (myState.ruleScore[FIVE]==-1);
-    bool needSix       = (myState.ruleScore[SIX]==-1);
-
-    // 상단 보너스 추적(고눈 보호용)
-    auto remainingUpperFaces = [&](){
-        vector<int> faces;
-        for (int f=1; f<=6; ++f) if (myState.ruleScore[f-1]==-1) faces.push_back(f);
-        return faces;
-    };
-    auto potentialUpper = [&](const array<int,7>& cnt, const vector<int>& faces){
-        int pot = 0;
-        for (int f: faces) pot += min(cnt[f],5) * f * 1000;
-        return pot;
-    };
-    int currUpper=0; for (int i=0;i<6;++i) if (myState.ruleScore[i]!=-1) currUpper+=myState.ruleScore[i];
-    vector<int> facesLeft = remainingUpperFaces();
-    bool bonusTrackLikely = (currUpper + potentialUpper(tmp, facesLeft) >= 63000);
-
-    // 얼굴별 가중치 계산 (작을수록 먼저 소비)
-    auto faceCost = [&](int f)->int{
-        if (tmp[f]==0) return INT_MAX/2;
-
-        // 이미 상단에 쓴 얼굴은 '가치 없음' → 가장 먼저 태움
-        if (upperUsed(f)) return -10000 - f; // 타이 브레이크로 낮은 눈 먼저
-
-        int cost = 0;
-
-        // 기본: 고눈일수록 보호(상대적으로 덜 쓰기)
-        cost += f * 120;            // pip 보호
-
-        // 스트레이트 살아있으면 2~5 보호
-        if (straightAlive && 2<=f && f<=5) cost += 1400;
-
-        // 4kind/풀하우스/야츠 각 보호
-        if (tmp[f] + 0 /*이미 base에서 빠짐*/ + (C[f]-tmp[f]) >= 4 && myState.ruleScore[FOUR_OF_A_KIND]==-1)
-            cost += 3500;           // 4kind 가능성
-        if (C[f] >= 3 && myState.ruleScore[f-1]==-1) 
-            cost += 2500;           // 상단 트리플 보호(초과 사용 억제)
-        if (C[f] >= 5 && myState.ruleScore[YACHT]==-1) 
-            cost += 6000;           // 야츠 보호
-
-        // 중·후반: ONE/TWO/THREE 미사용이면 저눈 보호 조금 완화(= 덤프는 FOUR~SIX에 우선)
-        if (midLate){
-            if (f==1 && needOne)   cost += 2000; // ONE은 중후반에만 보호
-            if (f==2 && needTwo)   cost += 800;
-            if (f==3 && needThree) cost += 600;
+    // 일반 모드: 순서에 따라 보충
+    auto pushByOrder = [&](const vector<int>& order){
+        for (int f : order) {
+            while (1<=f && f<=6 && tmp[f] > 0 && (int)base.size() < 5) {
+                base.push_back(f); tmp[f]--;
+            }
+            if ((int)base.size() == 5) break;
         }
-
-        // 보너스 트랙이 가능하면 4~6 더 보호
-        if (bonusTrackLikely && (f>=4)) cost += 900;
-
-        // 타깃 규칙별 미세 조정
-        if (target==SMALL_STRAIGHT){
-            // 작은 눈으로 채우는 경향
-            cost += f * 15;
-        }else if (target==CHOICE || target==FOUR_OF_A_KIND){
-            // 점수↑ 유지: 고눈 보존 → 저눈 우선으로 태움
-            cost += (7-f) * 10;
-        }else if (ONE<=target && target<=SIX){
-            // 상단에 두는 중이면 그 얼굴(f==face)은 이미 base에 들어가 있음.
-            // 보충은 작은 눈 우선(단, 보호 규칙은 그대로 반영)
-            cost += f * 20;
-        }
-
-        return cost;
     };
 
-    // 가중치가 낮은 순으로 채움
-    while ((int)base.size() < 5){
-        int bestF = -1, bestCost = INT_MAX;
-        for (int f=1; f<=6; ++f){
-            int c = faceCost(f);
-            if (c < bestCost){ bestCost = c; bestF = f; }
+    // 상단 사용/미사용 얼굴 분리
+    vector<int> usedFacesDesc, usedFacesAsc, unusedDesc, unusedAsc;
+    for (int f = 6; f >= 1; --f) {
+        if (upperUsed(f)) usedFacesDesc.push_back(f);
+        else              unusedDesc.push_back(f);
+    }
+    usedFacesAsc  = usedFacesDesc;  reverse(usedFacesAsc.begin(),  usedFacesAsc.end());
+    unusedAsc     = unusedDesc;     reverse(unusedAsc.begin(),     unusedAsc.end());
+
+    if (!comboAngle) {
+        // 각 없음 → 상단 쓴 얼굴 먼저 소모
+        if (target==CHOICE || target==FOUR_OF_A_KIND) {
+            // 점수↑가 유리 → 큰 눈 우선
+            pushByOrder(usedFacesDesc);
+            pushByOrder(unusedDesc);
+        } else if (target==SMALL_STRAIGHT) {
+            // 큰 눈 아끼고 작은 눈부터
+            pushByOrder(usedFacesAsc);
+            pushByOrder(unusedAsc);
+        } else { // 상단(ONE~SIX) 보충
+            // 해당 카테고리 눈 외 보충은 작은 눈부터
+            pushByOrder(usedFacesAsc);
+            pushByOrder(unusedAsc);
         }
-        if (bestF==-1 || bestCost>=INT_MAX/2) break; // 더 넣을 수 없음(안전장치)
-        base.push_back(bestF);
-        tmp[bestF]--;
+    } else {
+        // 각 있음 → 기존 기본 정책(저눈/고눈 우선) 유지
+        bool prefer_low = (target>=ONE && target<=SIX) || (target==SMALL_STRAIGHT);
+        if (prefer_low) {
+            for (int v=1; v<=6 && (int)base.size()<5; ++v)
+                while (tmp[v] > 0 && (int)base.size() < 5) { base.push_back(v); tmp[v]--; }
+        } else {
+            for (int v=6; v>=1 && (int)base.size()<5; --v)
+                while (tmp[v] > 0 && (int)base.size() < 5) { base.push_back(v); tmp[v]--; }
+        }
     }
 
-    if ((int)base.size()!=5) return vector<int>{};
+    if ((int)base.size() != 5) return vector<int>{}; // 불가능한 경우 방어
     return base;
 };
-
-
 
 
     auto pickTop5_from_cnt = [&](){
@@ -839,52 +812,6 @@ auto fillToFiveSmart = [&](vector<int> base, DiceRule target){
         };
         return rank[r];
     };
-
-    // === 초반(라운드 1~5) 보존 전략 가중치 ===
-auto usedCount = [&](const vector<int>& v, int face){
-    int c=0; for (int d: v) if (d==face) ++c; return c;
-};
-auto usedCountSet = [&](const vector<int>& v, std::initializer_list<int> faces){
-    int c=0; for (int d: v){ for (int f: faces){ if (d==f){ ++c; break; } } } return c;
-};
-
-bool early = (roundNo <= 5);
-bool oneStraightLeft =
-    (myState.ruleScore[SMALL_STRAIGHT]==-1) ^ (myState.ruleScore[LARGE_STRAIGHT]==-1);
-
-if (early){
-    // 1) 6/5 소모 패널티 (상단/선택/포카드에서 특히 강하게)
-    for (auto &c : cs){
-        bool penalizable = (c.r==CHOICE || c.r==FOUR_OF_A_KIND || (ONE<=c.r && c.r<=SIX));
-        if (!penalizable) continue;
-        int u6 = usedCount(c.use, 6);
-        int u5 = usedCount(c.use, 5);
-        c.eff -= u6 * 4000;
-        c.eff -= u5 * 2500;
-    }
-    // 2) 직선 하나 남았으면 2~5는 보존(직접 스트레이트 점수 내는 경우 제외)
-    if (oneStraightLeft){
-        for (auto &c : cs){
-            if (c.r==SMALL_STRAIGHT || c.r==LARGE_STRAIGHT) continue;
-            int uS = usedCountSet(c.use, {2,3,4,5});
-            c.eff -= uS * 1200;
-        }
-    }
-    // 3) 낮은 상단 쿼드(특히 TWO) 보너스: “2 네 개면 TWO 우선”
-    for (auto &c : cs){
-        if (ONE<=c.r && c.r<=SIX){
-            int face = c.r+1;
-            if (face<=3 && C[face]>=4) c.eff += 12000 + 1000*(C[face]-3);
-        }
-    }
-    // 4) 특례: 6이 3개↑ + 2가 4개↑ + TWO 미사용이면 → TWO 크게 밀어주고 SIX는 더 깎기
-    if (C[6]>=3 && C[2]>=4 && myState.ruleScore[TWO]==-1){
-        for (auto &c : cs){
-            if (c.r==TWO) c.eff += 20000;
-            if (c.r==SIX){ int u6 = usedCount(c.use,6); c.eff -= 6000*u6; }
-        }
-    }
-}
 
     sort(cs.begin(), cs.end(), [&](const Cand& a, const Cand& b){
         if (a.eff != b.eff) return a.eff > b.eff;

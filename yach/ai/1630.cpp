@@ -71,7 +71,8 @@ class Game {
     }
 
     // ======== 배치 전략 (항상 5개 출력, cnt 기반으로 빠르게) ========
-
+    // ======== 배치 전략 (항상 5개 출력, cnt 기반으로 빠르게) ========
+// ======== 배치 전략 (항상 5개 출력, cnt 기반으로 빠르게) ========
 DicePut calculatePut() {
     vector<int> usable;
     for (int r = 0; r < 12; ++r) if (myState.ruleScore[r] == -1) usable.push_back(r);
@@ -266,32 +267,26 @@ DicePut calculatePut() {
     }
 
     // 2) 풀하우스가 '트리플로 쓰인 얼굴'의 상단 칸이 비어 있으면 강하게 컷
-    int rulesLeftLate = 0; for (int r=0; r<12; ++r) if (myState.ruleScore[r]==-1) ++rulesLeftLate;
-    bool late9 = (rulesLeftLate <= 3);
-
-    // 2) 풀하우스 강한 금지(초중반만), 후반엔 완화
     for (auto &c : cs) {
         if (c.r != FULL_HOUSE) continue;
 
-        std::array<int,7> used{}; for (int d : c.use) if (1<=d && d<=6) used[d]++;
-        int triFace = -1; for (int f=1; f<=6; ++f) if (used[f] >= 3) { triFace = f; break; }
-        if (triFace == -1) continue;
+        std::array<int,7> used{}; 
+        for (int d : c.use) if (1<=d && d<=6) used[d]++;
 
-        if (!late9) { // 초중반: 강하게 컷
-            const int KILL_FH_IF_TRIPLE_OPEN = 100000;
-            const int EXTRA_KILL_IF_USE_2_5  = 10000;
-            if (myState.ruleScore[triFace-1] == -1) {
-                c.eff -= KILL_FH_IF_TRIPLE_OPEN;
-                bool straightAlive = (myState.ruleScore[SMALL_STRAIGHT]==-1 || myState.ruleScore[LARGE_STRAIGHT]==-1);
-                if (straightAlive) {
-                    int critUse = used[2] + used[3] + used[4] + used[5];
-                    if (critUse > 0) c.eff -= EXTRA_KILL_IF_USE_2_5;
-                }
+        // 트리플이 어떤 face인지 찾기
+        int triFace = -1;
+        for (int f=1; f<=6; ++f) if (used[f] >= 3) { triFace = f; break; }
+        if (triFace == -1) continue; // 안전장치
+
+        // 그 face의 상단 칸이 비어 있으면 풀하우스 거의 금지
+        if (myState.ruleScore[triFace-1] == -1) {
+            c.eff -= KILL_FH_IF_TRIPLE_OPEN;
+
+            // 스트레이트 살아있고, 풀하우스가 2~5를 소모하면 추가로 더 감점
+            if (straightAlive) {
+                int critUse = used[2] + used[3] + used[4] + used[5];
+                if (critUse > 0) c.eff -= EXTRA_KILL_IF_USE_2_5;
             }
-        } else {
-            // 후반(라운드 9+): 금지 해제, 약한 페널티만 남김
-            const int SOFT_PENALTY_LATE = 3000;
-            if (myState.ruleScore[triFace-1] == -1) c.eff -= SOFT_PENALTY_LATE;
         }
     }
 
@@ -367,22 +362,6 @@ DicePut calculatePut() {
                     c.eff -= face * DUMP_FACE_PENALTY_PER_PIP;
                     if (face == 1) c.eff += DUMP_ONE_EXTRA_BONUS;
                 }
-            }
-        }
-    }
-    int rulesLeft = 0; for (int r=0; r<12; ++r) if (myState.ruleScore[r]==-1) ++rulesLeft;
-    int lateTier = (rulesLeft <= 2 ? 3 : rulesLeft <= 3 ? 2 : rulesLeft <= 4 ? 1 : 0);
-    if (lateTier > 0) {
-        // 단계별 부스트 (필요시 조절)
-        const int BOOST4[4] = { 0, 7000, 11000, 15000 };  // 4kind
-        const int BOOSTF[4] = { 0, 6000,  9000, 12000 };  // Full House
-
-        for (auto &c : cs) {
-            if (c.r == FOUR_OF_A_KIND && myState.ruleScore[FOUR_OF_A_KIND]==-1) {
-                if (c.raw >= 14000) c.eff += BOOST4[lateTier];  // 너무 허접한 4kind는 제외
-            }
-            if (c.r == FULL_HOUSE && myState.ruleScore[FULL_HOUSE]==-1) {
-                if (c.raw >= 15000) c.eff += BOOSTF[lateTier];  // 16k 같은 저득점은 과도 승격 방지
             }
         }
     }

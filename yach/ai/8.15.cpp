@@ -12,7 +12,9 @@
 #include <climits>
 #include <utility>
 #include <cmath>
+#include <iomanip>
 using namespace std;
+
 constexpr int SMALL_STRAIGHT_SCORE = 15000;
 constexpr int LARGE_STRAIGHT_SCORE = 30000;
 constexpr int YACHT_SCORE          = 50000;
@@ -105,6 +107,21 @@ constexpr int    ZERO_RATE_CAP         = 1000;   // 우리 상한을 1000으로 
 constexpr int   OPPO_LOW_AVG_THRESH  = 2000;
 constexpr int   ULTRA_LOW_CAP        = 3000;
 constexpr int FINAL_SAFE_MARGIN = 10;
+
+// 라운드 가중치
+constexpr double LARGE_STRAIGHT_ROUND_RATE =0.12;
+constexpr double SMALL_STRAIGHT_ROUND_RATE =0.23;
+
+// 입찰 가중치
+constexpr int LARGE_STRAIGHT_BID=60;
+constexpr int SMALL_STRAIGHT_BID=40;
+constexpr int ROUND_ONE_MAX_BAT = 3812;
+
+constexpr int FULL_HOUSE_BID=20;
+constexpr double FULL_HOUSE_ROUND_RATE =0.4;
+
+constexpr int FOUR_KIND_WEIGHT = 20;
+constexpr double FOUR_KIND_ROUND_RATE =0.4;
 // 가능한 주사위 규칙들을 나타내는 enum
 enum DiceRule {
     ONE, TWO, THREE, FOUR, FIVE, SIX,
@@ -129,7 +146,9 @@ struct GameState {
     array<int,7> cnt{};      // 1..6 주사위 개수(진실 소스)
     vector<int> ruleScore;   // 각 규칙별 획득 점수 (사용하지 않았다면 -1)
     int bidScore;            // 입찰로 얻거나 잃은 총 점수
-    
+    char now;
+    mutable vector<int> bestPutA, bestPutB;
+    mutable int bestRuleA = -1, bestRuleB = -1;
 
     GameState() : ruleScore(12, -1), bidScore(0) {}
 
@@ -152,30 +171,93 @@ class Game {
     long long oppBidSum = 0;
     int oppBidCount = 0;
     deque<int> myBidHist, oppBidHist;
+    vector<int> difference;
+    char mywant;
+    int mybid;
+    vector<int> invest;  
+    vector<char> predict;
+    vector<bool> correct;
+    int max_my_bid;
+    int min_my_bid;
+    int multiple=1;
+    int gap=0;
+    std::pair<int,int> getOppBidMinMax(bool excludeNearZero = false) const {
+        if (oppBidHist.empty()) return {0, 0};
 
+        int mn = INT_MAX, mx = INT_MIN;
+        for (int b : oppBidHist) {
+            if (excludeNearZero && std::abs(b) <= NEAR_ZERO_THRESH) continue;
+            mn = std::min(mn, b);
+            mx = std::max(mx, b);
+        }
+        if (mn == INT_MAX) return {0, 0}; // 전부 near-zero로 제외된 경우
+        return {mn, mx};
+    };
+    static inline bool sameDice(const vector<int>& A, const vector<int>& B){
+        if (A.size() != B.size()) return false;
+        int cnt[7] = {0};
+        for (int x: A){ if (x<1 || x>6) return false; cnt[x]++; }
+        for (int x: B){ if (x<1 || x>6) return false; cnt[x]--; }
+        for (int f=1; f<=6; ++f) if (cnt[f] != 0) return false;
+        return true;
+    }
+    double getOppBidAvg(int lastK = -1, bool excludeNearZero = false) const {
+        if (oppBidHist.empty()) return 0.0;
+
+        int n = 0;
+        long long sum = 0;
+
+        int start = 0;
+        if (lastK > 0 && lastK < (int)oppBidHist.size())
+            start = (int)oppBidHist.size() - lastK;
+
+        for (int i = start; i < (int)oppBidHist.size(); ++i) {
+            int b = oppBidHist[i];
+            if (excludeNearZero && std::abs(b) <= NEAR_ZERO_THRESH) continue;
+            sum += b; ++n;
+        }
+        return n ? (double)sum / n : 0.0;
+    }
     
-    static inline bool canCrossUpperNow(const GameState& st, const std::array<int,7>& cnt) {
-    // 현재까지 상단 누적 점수
+    static inline int needBonus(const GameState& st) {// 보너스까지 필요양
     int cur = 0;
     for (int i = 0; i < 6; ++i)
         if (st.ruleScore[i] != -1) cur += st.ruleScore[i];
-
-    if (cur >= 63000) return false; // 이미 보너스 받았으면 해당 없음
-
-    // 아직 비어 있는 상단 칸들 중 하나를 이번 주사위로 채웠을 때 63k를 넘는지?
-    for (int f = 1; f <= 6; ++f) {
-        if (st.ruleScore[f-1] == -1) {
-            int add = std::min(cnt[f], 5) * f * 1000; // 그 얼굴로 얻는 상단 점수
-            if (cur + add >= 63000) return true;
-        }
-    }
-    return false;
+        if (cur >= 63000) return 0; // 이미 보너스 받았으면 해당 없음
+        return 63000-cur;
     }
     pair<DicePut,DicePut> planFinalTwoExhaustive() const;
+    static int canbonus(const GameState& st,const std::array<int,7>& cnt){
+        int left=needBonus(st)/1000;
+        if(left<=0) return 100000;// 이미 성공 굳이 할필요없음
+        for(int i=1; i<=6; i++){
+            if(st.ruleScore[i-1]==-1){
+                left-=i*cnt[i];
+            }
+        }
+        return left;
+    }
     // ======== 입찰 전략 ========
     
    Bid calculateBid(const vector<int>& diceA, const vector<int>& diceB) {
     ++roundNo;
+
+    auto selectLarge = [&](const array<int,7> &dice){
+        int a[5]={1,2,3,4,5}, b[5]={2,3,4,5,6};
+        auto ok=[&](int* s){ for(int i=0;i<5;i++) if(dice[s[i]]==0) return false; return true; };
+        if (ok(a)) return vector<int>{1,2,3,4,5};
+        if (ok(b)) return vector<int>{2,3,4,5,6};
+        return vector<int>{};
+    };
+    auto selectSmall = [&](const array<int,7> &dice){
+        int a[4]={1,2,3,4}, b[4]={2,3,4,5}, c[4]={3,4,5,6};
+        auto ok=[&](int* s){ for(int i=0;i<4;i++) if(dice[s[i]]==0) return false; return true; };
+        if (ok(a)) return vector<int>{1,2,3,4};
+        if (ok(b)) return vector<int>{2,3,4,5};
+        if (ok(c)) return vector<int>{3,4,5,6};
+        return vector<int>{};
+    };
+    
 
     // 동적 상한 (라운드/상대 히스토리 반영)
     auto capByRound = [&](long long x)->int {
@@ -199,240 +281,834 @@ class Game {
         return (int)x;
     };
 
-    // ---------- 1라운드: 기존 전략 유지 ----------
-    if (roundNo == 1) {
-        auto cnt6 = [](const vector<int>& v){ return (int)count(v.begin(), v.end(), 6); };
-        auto sumv = [](const vector<int>& v){ return accumulate(v.begin(), v.end(), 0); };
-
-        int c6A = cnt6(diceA), c6B = cnt6(diceB);
-        int sumA = sumv(diceA),  sumB = sumv(diceB);
-        char group = (c6A != c6B) ? (c6A > c6B ? 'A' : 'B')
-                                  : (sumA >= sumB ? 'A' : 'B'); // 동률 A
-
-        int k = (group=='A' ? c6A : c6B); k = max(0, min(5, k));
-        int amount = INIT_BID_BY_SIX[k];
-        return Bid{group, capByRound(amount)};
-    }
-    // ---------- 2라운드 이상 ----------
-    auto addPack = [](array<int,7> c, const vector<int>& p){
-        for (int d : p) if (1<=d && d<=6) c[d]++;
-        return c;
-    };
-    auto currUpper = [](const GameState& st){
-        int s=0; for (int i=0;i<6;++i) if (st.ruleScore[i]!=-1) s+=st.ruleScore[i];
-        return s;
-    };
-    auto bestChoice = [](const array<int,7>& c){
-        int need=5,sum=0; for (int v=6; v>=1 && need>0; --v){ int t=min(need,c[v]); sum+=t*v; need-=t; }
-        return sum*1000;
-    };
-    auto bestFourKind = [](const array<int,7>& c){
-        int best=0;
-        for (int v=6; v>=1; --v) if (c[v]>=4){
-            int extra=0; for (int x=6; x>=1; --x){ int have=c[x]-(x==v?4:0); if (have>0){ extra=x; break; } }
-            best = max(best,(4*v+extra)*1000);
+    auto calprefer5 =[&](const vector<int>& dice, const GameState &myState)->double {
+        array<int,7> curdice{};
+        for(auto a:dice){
+            curdice[a]++;
         }
-        return best;
+        double dap=0;
+            auto sumv = [](const vector<int>& v){ return accumulate(v.begin(), v.end(), 0); };
+            auto cntNum = [](const vector<int>& v,int num){ return (int)count(v.begin(), v.end(), num); };
+            bool onlyNumber=true;
+                double sc = 0;
+                for(int j=6; j<=11; j++){
+                    if(myState.ruleScore[j]==-1)onlyNumber=false;
+            }
+            if(onlyNumber){
+                for(int i=0; i<6; i++){
+                if(myState.ruleScore[i]==-1){
+                    dap+=(i+1)*curdice[i+1]*20;
+                }
+            }
+                return dap;
+            }
+            if(myState.ruleScore[CHOICE]==-1){
+                dap+=sumv(dice)*1.6+sumv(dice)*roundNo*0.1*1.3;
+            }
+            if(roundNo>=4){ // 6아끼기 전략임
+                if(myState.ruleScore[SIX]==-1){
+                    dap+=cntNum(dice,6)*17;
+                }
+                else{
+                    dap+=cntNum(dice,6)*5;
+                }
+            }
+            if(roundNo==1){
+                if(myState.ruleScore[SIX]==-1){
+                    dap+=cntNum(dice,6)*10;
+                }
+            }
+            if(roundNo>=10){
+                if(myState.ruleScore[SIX]==-1){
+                    dap+=cntNum(dice,6)*17;
+                }
+            }
+            if(myState.ruleScore[LARGE_STRAIGHT]==-1){
+                auto v=selectLarge(curdice);
+                if(v.size()!=0)dap+=LARGE_STRAIGHT_BID+LARGE_STRAIGHT_BID*roundNo*LARGE_STRAIGHT_ROUND_RATE;
+                auto v2=selectSmall(curdice);
+                if(!v2.empty()){
+                    dap+=3;
+                }
+            }
+            if(myState.ruleScore[SMALL_STRAIGHT]==-1){
+                auto v=selectSmall(curdice);
+                if(!v.empty()){
+                    dap+=SMALL_STRAIGHT_BID+SMALL_STRAIGHT_BID*roundNo*SMALL_STRAIGHT_ROUND_RATE+3;
+                }
+            }
+            for(int i=0; i<6; i++){
+                if(myState.ruleScore[i]==-1){
+                    int cnt=curdice[i+1];
+                    dap+=(i+1)*curdice[i+1];
+                    if(myState.ruleScore[YACHT]!=-1){
+                        dap+=10;
+                    }
+                    else if (myState.ruleScore[YACHT]==-1 && roundNo>10) dap+=20;
+                    if(cnt==3&&myState.ruleScore[YACHT]==-1){
+                        dap+=pow(2,cnt)*(1+i)*0.8;
+                        if(i==0){
+                            dap+=5;
+                        }
+                    }
+                    if(cnt>=4){
+                        if(myState.ruleScore[YACHT]==-1 && roundNo>9 && roundNo<=11) dap+=100;
+                        if(myState.ruleScore[YACHT]!=-1){
+                            dap+=pow(2,cnt)*(1+i)*0.8;
+                            if(i==0){
+                                dap*=0.7;
+                            }
+                        }
+                        else{// 야추 안함
+                            dap+=pow(3,cnt)*(1+i)*0.2*roundNo;
+                            if(1+i==1){
+                                dap+=30;
+                            }
+                        }
+                        if(myState.ruleScore[YACHT]==-1&&i==0){
+                            dap+=21;
+                        }
+                        if(myState.ruleScore[YACHT]==-1&&roundNo<=10){
+                            dap+=120;
+                        }
+                    }                     
+                    if(cnt==5&&myState.ruleScore[YACHT]==-1){
+                        dap+=171;
+                    }
+                    if(myState.ruleScore[YACHT]!=-1){
+                        if(cnt==2&&(1+i)>=4){
+                            dap+=pow(2,cnt)*(1+i)*0.8;
+                        }
+                    }                                                                                      
+                }
+            }
+            return dap;
     };
-    auto bestFullHouse = [](const array<int,7>& c){
-        for (int v=6; v>=1; --v) if (c[v]==5) return 5*v*1000;
-        int best=0;
-        for (int t=6; t>=1; --t) if (c[t]>=3)
-            for (int p=6; p>=1; --p) if (p!=t && c[p]>=2){ best=max(best,(3*t+2*p)*1000); break; }
-        return best;
-    };
-    auto hasSmall = [](const array<int,7>& c){
-        bool a=c[1]>0&&c[2]>0&&c[3]>0&&c[4]>0;
-        bool b=c[2]>0&&c[3]>0&&c[4]>0&&c[5]>0;
-        bool d=c[3]>0&&c[4]>0&&c[5]>0&&c[6]>0;
-        return a||b||d;
-    };
-    auto hasLarge = [](const array<int,7>& c){
-        bool a=c[1]>0&&c[2]>0&&c[3]>0&&c[4]>0&&c[5]>0;
-        bool b=c[2]>0&&c[3]>0&&c[4]>0&&c[5]>0&&c[6]>0;
-        return a||b;
-    };
-    auto hasYacht = [](const array<int,7>& c){
-        for (int f=1; f<=6; ++f) if (c[f]>=5) return true;
-        return false;
-    };
-    auto bestUpperWithBonus = [&](const GameState& st, const array<int,7>& c){
-        int cu = currUpper(st);
-        int best = 0;
-        for (int f=1; f<=6; ++f) if (st.ruleScore[f-1]==-1) {
-            int base = min(c[f],5)*f*1000;
-            int add  = (cu < UPPER_TARGET && cu + base >= UPPER_TARGET) ? UPPER_BONUS : 0;
-            best = max(best, base + add);
+    
+    auto calprefer = [&](const vector<int>& dice,const GameState &myState,char who)->double {
+        // for(auto a:dice){
+        //     cout<<a<<" ";
+        // }
+        // cout<<"주사위 \n";
+        array<int,7> curdice=myState.cnt;
+
+        double hateONE=0;
+        for(auto a:dice){
+            curdice[a]++;
+            if(myState.ruleScore[ONE]!=-1&&a==1){
+                hateONE+=5;
+            }
         }
-        return best;
-    };
-    auto bestImmediate = [&](const GameState& st, const array<int,7>& c){
-        int best = 0;
-        if (st.ruleScore[CHOICE]==-1)         best = max(best, bestChoice(c));
-        if (st.ruleScore[FOUR_OF_A_KIND]==-1) best = max(best, bestFourKind(c));
-        if (st.ruleScore[FULL_HOUSE]==-1)     best = max(best, bestFullHouse(c));
-        if (st.ruleScore[SMALL_STRAIGHT]==-1 && hasSmall(c)) best = max(best, SMALL_STRAIGHT_SCORE);
-        if (st.ruleScore[LARGE_STRAIGHT]==-1 && hasLarge(c)) best = max(best, LARGE_STRAIGHT_SCORE);
-        if (st.ruleScore[YACHT]==-1 && hasYacht(c))          best = max(best, YACHT_SCORE);
-        best = max(best, bestUpperWithBonus(st, c));
-        return best;
-    };
+        
+        if(roundNo==1){
+            return calprefer5(dice,myState);
+        }
+        else if(roundNo!=12){ //중반 라운드 *********************
+            //curdice에 현재 사용가능한 10개의 주사위가 있음 
+            // 이것을 사용하여 5개의 숫자와 뽑지 않은 나머지 5개는 calprefer5함수를 통해 적당히 더하여서 가장좋은 조합을 선택해서 myState에 vector변수 추가해서 숫자 5개 넣어줘야함
+            // 중반 라운드: 10개 풀에서 최적 5개 + 남은 5개 가중
+            // curdice == myState.cnt + dice 로 합쳐진 10개 풀(카운트)
+            // 모든 5개 멀티셋 후보 열거
+        std::vector<std::vector<int>> candidates;
+        std::vector<int> cur;
+        std::function<void(int, std::array<int,7>, int)> dfs =
+            [&](int face, std::array<int,7> left, int taken){
+                if (taken == 5) { candidates.push_back(cur); return; }
+                if (face > 6) return;
+                int can = std::min(left[face], 5 - taken);
 
-    // 카운트 after pick
-    array<int,7> myC0 = myState.cnt, oppC0 = oppState.cnt;
-    array<int,7> myA = addPack(myC0, diceA), myB = addPack(myC0, diceB);
-    array<int,7> opA = addPack(oppC0, diceA), opB = addPack(oppC0, diceB);
+                // 0개 선택
+                dfs(face+1, left, taken);
+                // 1..can개 선택
+                for (int k=1; k<=can; ++k) {
+                    cur.insert(cur.end(), k, face);
+                    left[face] -= k;
+                    dfs(face+1, left, taken + k);
+                    left[face] += k;
+                    cur.resize(cur.size() - k);
+                }
+            };
+        dfs(1, curdice, 0);
+        // cout<<candidates.size()<<"\n";
+        // dumpCandidates(candidates, 20);
+        // assert(candidates.size() == expected(curdice));
 
-    int myBest_A  = bestImmediate(myState, myA);
-    int myBest_B  = bestImmediate(myState, myB);
-    int oppBest_A = bestImmediate(oppState, opA);
-    int oppBest_B = bestImmediate(oppState, opB);
+        // pick을 쓰고 남는 5개 만들기
+        auto buildRest = [&](const std::vector<int>& pick){
+            std::array<int,7> cnt = curdice;
+            for (int v: pick) { if (v<1||v>6 || cnt[v]==0) return std::vector<int>{}; cnt[v]--; }
+            std::vector<int> rest; rest.reserve(5);
+            for (int f=1; f<=6; ++f) for (int c=0; c<cnt[f]; ++c) rest.push_back(f);
+            if ((int)rest.size() != 5) return std::vector<int>{};
+            return rest;
+        };
 
-    long long SWING_A = (long long)(myBest_A - myBest_B) + (long long)(oppBest_B - oppBest_A);
-    long long SWING_B = (long long)(myBest_B - myBest_A) + (long long)(oppBest_A - oppBest_B);
+        // ===== 즉시 점수(=어디에 넣을지) 계산 =====
+        auto bestImmediateRule = [&](const std::vector<int>& pick)->std::pair<int,double>{
+            // ruleIndex, scoreNow
+            std::array<int,7> pc{}; for (int v: pick) pc[v]++;
 
-    char group = (SWING_A >= SWING_B ? 'A' : 'B');
-    long long SW   = (group=='A' ? SWING_A : SWING_B);
-    int myBestChosen  = (group=='A' ? myBest_A  : myBest_B);
-    int myBestOther   = (group=='A' ? myBest_B  : myBest_A);
+            auto isSmall = [&](){
+                auto has=[&](std::initializer_list<int> s){ for(int t:s) if(pc[t]==0) return false; return true; };
+                return has({1,2,3,4}) || has({2,3,4,5}) || has({3,4,5,6});
+            };
+            auto isLarge = [&](){
+                auto has=[&](std::initializer_list<int> s){ for(int t:s) if(pc[t]==0) return false; return true; };
+                return has({1,2,3,4,5}) || has({2,3,4,5,6});
+            };
+            auto isYacht = [&](){ for (int f=1; f<=6; ++f) if (pc[f]==5) return true; return false; };
+            // 풀하우스/포카드가 룰로 있다면 필요 시 해제
+            auto isFull = [&](){ bool tri=false,pair=false; for(int f=1;f<=6;++f){ tri|=(pc[f]==3); pair|=(pc[f]==2);} return tri&&pair; };
+            auto isFour = [&](){ for(int f=1;f<=6;++f) if(pc[f]>=4) return true; return false; };
 
-    // ① 선호가 반대로 갈리면 → 소액만 (3)
-    bool myPreferA  = (myBest_A  >= myBest_B  + PREF_GAP);
-    bool myPreferB  = (myBest_B  >= myBest_A  + PREF_GAP);
-    bool oppPreferA = (oppBest_A >= oppBest_B + PREF_GAP);
-    bool oppPreferB = (oppBest_B >= oppBest_A + PREF_GAP);
-    if ((myPreferA && oppPreferB) || (myPreferB && oppPreferA)) {
-        char g = myPreferA ? 'A' : 'B';
-        return Bid{g, capByRound(3)};
+            int bestRule = -1;
+            double bestScore = -1e100;
+
+            // 상단 (ONES~SIXES: 0..5)
+
+            for (int i=0; i<6; ++i) if (myState.ruleScore[i]==-1) {
+                bool onlyNumber=true;
+                double sc = 0;
+                for(int j=6; j<=11; j++){
+                    if(myState.ruleScore[j]==-1)onlyNumber=false;
+                }
+
+                if(onlyNumber){
+                    if(pc[i+1]==5){
+                        sc=100+i;
+                    }
+                    int useless=0;
+                    for(int j=0; j<6; j++){
+                        if(i==j)continue;
+                        if(myState.ruleScore[j]==-1&&pc[j+1]>=1){
+                            sc-=pc[j+1]*(j+1)*0.8;
+                        }
+                        if(myState.ruleScore[j]!=-1){
+                            useless+=pc[j+1];
+                        }
+                    }
+                    if(useless>=6){
+                        sc+=(6-i)*pc[i+1];
+                    }
+                    else if(pc[i+1]==4){
+                        int now =i+1;
+                        bool keep=false;
+                        for(int j=0; j<now/2; j++){
+                            if(myState.ruleScore[j]==-1){
+                                keep=true;
+                            }
+                        }
+                        if(!keep){
+                            sc+=(i+1)*pc[i+1]*1.3;
+                        }
+                    }
+                    else{
+                        sc+=(6-i)*pc[i+1];
+                    }
+                }
+                else{
+                sc += pc[i+1] * (i+1)*2.2; // 즉시 점수
+                int left =0;
+                if(needBonus(myState)!=0){
+                    left=canbonus(myState,curdice);
+                    if(left==100000)left=0;
+                    else if(left<0) left=42;// 이미 성공이니깐 다른곳에 안빠지게 해야함
+                    else{
+                        vector<int> canuse;
+                        for(int i=0; i<6; i++){
+                            if(myState.ruleScore[i]==-1){
+                                canuse.push_back(i+1);
+                            }
+                        }
+                        if(roundNo>=11 &&canuse.size()<2 &&left>=12000){
+                            left=-13;// 더좋은곳에 쓰게 유도해야함
+                        }
+                    }
+
+                }
+                else{
+                    left-=40;// 다른 조합애들한테 이득보게
+                }
+                sc+=left;
+
+                if(i+1==1){
+                    sc+=18;//30
+                }
+                if(i+1==2){
+                    sc+=9; //20
+                }
+                if(pc[i+1]==3 && i!=0){
+                    sc+=pow(2,pc[i+1])*(7-i)*0.8+10;
+                    if(roundNo<=6){
+                        if(i+1==6){
+                            sc*=0.4;
+                        }
+                        if(i+1==5){
+                            sc*=0.5;
+                        }
+                    }
+                }
+                if(pc[i+1]>=4&&myState.ruleScore[YACHT]!=-1&& i!=0){
+                    sc+=pow(3,pc[i+1])*(7-i);
+                    if(i+1<=3){
+                        sc*=0.6;
+                    }
+                    if(i==0)sc*2;
+                }
+                if(pc[i+1]==4 &&myState.ruleScore[YACHT]==-1&& i!=0){
+                    sc+=pow(2,pc[i+1])*(7-i)*0.8;
+                    if(i+1<=3){
+                        sc-=30;
+                    }
+                }
+                if(pc[i+1]==5&&myState.ruleScore[YACHT]==-1){
+                    sc+=1000; /// **********
+                    if(i+1<=3&& myState.ruleScore[YACHT]==-1){
+                        sc-=1000;//////////********* 보너스 받을 수 있으면 로직이 바뀌어야하는거 추가로 넣어줘야함*/
+                    }
+                    if(i+1==4&& myState.ruleScore[YACHT]==-1){
+                        sc-=500;
+                    }
+                    if(i+1>=6){
+                        sc+=120;
+                    }
+                }
+                if(i+1==6&&pc[i+1]<=2&&roundNo<=3){
+                    sc-=17;
+                }
+                for(int j=0; j<6; j++){
+                    if(i==j)continue;
+                    if(myState.ruleScore[j]==-1&&pc[j+1]>=1){
+                        sc-=pc[j+1]*(j+1)*0.8;
+                    }
+                }
+                if(i!=5&&myState.ruleScore[SIX]!=-1&&pc[6]>=1 && roundNo<=6){
+                    sc-=6*pc[6];
+                }
+                }
+                if (sc > bestScore) { bestScore=sc; bestRule=i; }
+            }
+
+
+
+            // FULL HOUSE
+            if (myState.ruleScore[FULL_HOUSE]==-1 && isFull()) {
+                double s=0; for (int f=1; f<=6; ++f) s += f*pc[f];
+                double sc = s*1.09 + FULL_HOUSE_BID * roundNo * FULL_HOUSE_ROUND_RATE;
+                if(needBonus!=0) sc+=30;
+                if(s>=23&&roundNo>=6){
+                    sc+=20;
+                }
+                if(roundNo<=7|| s<20){
+                    sc-=20;
+                }
+                if(roundNo<=7 && s<15){
+                    sc-=400;
+                }
+                if(roundNo>=9){
+                    for(int i=0; i<6; i++){
+                    if(myState.ruleScore[i]==-1&& pc[i+1]>=1){
+                        sc-=100;
+                    }
+                    }
+                }
+                if (sc > bestScore) { bestScore = sc; bestRule = FULL_HOUSE; }
+            }
+
+            // FOUR OF A KIND (합 기반)
+            if (myState.ruleScore[FOUR_OF_A_KIND]==-1 && isFour()) {
+                double s = 0; for (int f=1; f<=6; ++f) s += f * pc[f]; // pick의 합
+                double sc = s + s * roundNo * FOUR_KIND_ROUND_RATE;
+                if(needBonus!=0) sc+=30;
+                int target=0;
+                for(int i=1; i<=6; i++){
+                    if(pc[i]>=4)target=i;
+                }
+                if(s>=22){
+                    sc+=20;
+                }
+                if(roundNo<=7 &&s<20){
+                    sc-=17;
+                }
+                if(roundNo>=9){
+                    for(int i=0; i<6; i++){
+                    if(myState.ruleScore[i]==-1&& pc[i+1]>=1){
+                        sc-=100;
+                    }
+                    }
+                }
+                if(myState.ruleScore[YACHT]!=-1&& myState.ruleScore[target-1]!=-1){
+                    sc+=10;
+                }
+                
+                if (sc > bestScore) { bestScore = sc; bestRule = FOUR_OF_A_KIND; }
+            }
+
+
+
+            // CHOICE (8)
+            if (myState.ruleScore[CHOICE]==-1) {
+                int s=0; for (int f=1; f<=6; ++f) s += f*pc[f];
+                // ‘옛날 느낌’ 유지: 라운드 가중
+                double sc = s*0.9 + s*roundNo*0.3*1.3;
+                if(roundNo<=10 && s<24){
+                    sc-=100;
+                }
+                if(roundNo<=7){
+                    sc-=50;
+                }
+                if(roundNo>=10&& needBonus==0 && myState.ruleScore[YACHT]==-1){
+                    sc+=20;
+                }
+                if(myState.ruleScore[SIX]==-1){
+                    sc-=pc[6]*4;
+                }
+                if(roundNo>=8){
+                    for(int i=0; i<6; i++){
+                    if(myState.ruleScore[i]==-1&& pc[i+1]>=1){
+                        sc-=22*pc[i+1]*1.3;
+                        }
+                    }
+                }
+                if (sc > bestScore) { bestScore=sc; bestRule=CHOICE; }
+            }
+
+            // SMALL STRAIGHT (9)
+            if (myState.ruleScore[SMALL_STRAIGHT]==-1 && isSmall()) {
+                double sc = SMALL_STRAIGHT_BID + SMALL_STRAIGHT_BID*roundNo*SMALL_STRAIGHT_ROUND_RATE;
+                if (sc > bestScore) { bestScore=sc; bestRule=SMALL_STRAIGHT; }
+            }
+
+            // LARGE STRAIGHT (10)
+            if (myState.ruleScore[LARGE_STRAIGHT]==-1 && isLarge()) {
+                double sc = LARGE_STRAIGHT_BID + LARGE_STRAIGHT_BID*roundNo*LARGE_STRAIGHT_ROUND_RATE;
+                if(roundNo<=6){
+                    sc+=7;
+                }
+                if (sc > bestScore) { bestScore=sc; bestRule=LARGE_STRAIGHT; }
+            }
+
+            // YACHT (11) — calprefer5와 스케일 맞추려 171 사용
+            if (myState.ruleScore[YACHT]==-1 && isYacht()) {
+                double sc = 1001;
+                if (sc > bestScore) { bestScore=sc; bestRule=YACHT; }
+            }
+
+            
+            return {bestRule, bestScore};
+        };
+
+        const double NOW_WEIGHT  = 3.0; // "먼저 쓸 것" 가중치 (더 큼)
+        const double REST_WEIGHT = 0.5; // 남는 5개 가중치 (작게; 튜닝 가능)
+
+        double bestTotal = -1e100;
+        std::vector<int> bestPick, bestRest;
+        int bestRuleIdx = -1;
+
+        for (const auto& pick : candidates) {
+            auto rest = buildRest(pick);
+            if (rest.empty()) continue;
+
+            // 어디에 넣을지 + 즉시점수
+            auto [ruleIdx, nowScore] = bestImmediateRule(pick);
+            if (ruleIdx < 0) continue; // 넣을 수 있는 칸이 없으면 패스
+
+            // 그 칸을 사용한 가정으로 남은 5개 평가 (myState는 복사본으로 업데이트)
+            GameState st2 = myState;
+            st2.ruleScore[ruleIdx] = 0; // 사용 처리 (점수 값은 의미 없음, ‘사용됨’ 표시만)
+
+            double restScore = calprefer5(rest, st2);
+
+            double total = NOW_WEIGHT * nowScore + REST_WEIGHT * restScore-hateONE*1.8;
+
+            if (total > bestTotal) {
+                bestTotal  = total;
+                bestPick   = pick;
+                bestRest   = rest;
+                bestRuleIdx = ruleIdx;
+            }
+        }
+        if (!bestPick.empty()) {
+            // PUT 때 쓰도록 저장
+            if (who=='A') { myState.bestPutA = bestPick; myState.bestRuleA = bestRuleIdx; }
+            else          { myState.bestPutB = bestPick; myState.bestRuleB = bestRuleIdx; }
+            return bestTotal;
+        } else {
+            // 방어: 후보가 없으면 현재 5개 그대로 + 어디 넣을지는 CHOICE or 상단 최대 등으로
+            auto [ruleIdx, nowScore] = bestImmediateRule(dice);
+            if (who=='A') { myState.bestPutA = dice; myState.bestRuleA = ruleIdx; }
+            else          { myState.bestPutB = dice; myState.bestRuleB = ruleIdx; }
+            return NOW_WEIGHT*nowScore; // rest 없음
+        }
+        }   
+        else { // 마지막 라운드: 10개 풀에서 5개+5개 완전탐색, 합산 최대
+        // 1) 이번 라운드에 실제로 쓸 10개 풀(이미 위에서 curdice에 myState.cnt + dice 합쳐둠)
+        const std::array<int,7> C0 = curdice;
+
+        // 2) 남은 규칙(사용 안 한 칸들)
+        std::vector<int> rules;
+        for (int r=0; r<12; ++r) if (myState.ruleScore[r]==-1) rules.push_back(r);
+        if (rules.size() < 2) {
+            // 방어: 한 칸만 남았거나 이상 상태면 그냥 현재 5개 평가로 대체
+            if (who=='A') { myState.bestPutA = dice; myState.bestRuleA = (rules.empty()?CHOICE:rules[0]); }
+            else          { myState.bestPutB = dice; myState.bestRuleB = (rules.empty()?CHOICE:rules[0]); }
+            return calprefer5(dice, myState);
+        }
+
+        // 3) 유틸
+        auto expand = [&](const std::array<int,7>& h){
+            std::vector<int> d; d.reserve(5);
+            for (int f=1; f<=6; ++f) for (int k=0;k<h[f]; ++k) d.push_back(f);
+            return d;
+        };
+        auto minusCnt = [&](std::array<int,7> a, const std::array<int,7>& b){
+            for (int f=1; f<=6; ++f) a[f]-=b[f]; return a;
+        };
+        auto isUpper = [](int r)->bool{ return ONE<=r && r<=SIX; };
+
+        // 현재 상단 누적(보너스 계산용)
+        int currUpper=0; for (int i=0;i<6;++i) if (myState.ruleScore[i]!=-1) currUpper+=myState.ruleScore[i];
+
+        // 4) 5개 멀티셋 전부 생성 (용량 제약 포함)
+        std::vector<std::array<int,7>> hands1;
+        std::array<int,7> curH{}; // 1..6 사용
+        std::function<void(int,int,const std::array<int,7>&)> gen1 =
+            [&](int f, int rem, const std::array<int,7>& C){
+                if (f==7){ if(rem==0) hands1.push_back(curH); return; }
+                int cap = std::min(rem, C[f]);
+                for (int k=0;k<=cap;++k){ curH[f]=k; gen1(f+1, rem-k, C); }
+                curH[f]=0;
+            };
+        gen1(1,5,C0);
+
+        long long bestTot = LLONG_MIN;
+        std::vector<int> bestD1, bestD2;
+        int bestR1=-1, bestR2=-1;
+
+        for (const auto& h1 : hands1){
+            // 남은 카운트로 h2 전부 생성
+            std::array<int,7> C1 = minusCnt(C0, h1);
+
+            std::vector<std::array<int,7>> hands2;
+            std::array<int,7> cur2{};
+            std::function<void(int,int,const std::array<int,7>&)> gen2 =
+                [&](int f, int rem, const std::array<int,7>& C){
+                    if (f==7){ if(rem==0) hands2.push_back(cur2); return; }
+                    int cap = std::min(rem, C[f]);
+                    for (int k=0;k<=cap;++k){ cur2[f]=k; gen2(f+1, rem-k, C); }
+                    cur2[f]=0;
+                };
+            gen2(1,5,C1);
+
+            std::vector<int> d1 = expand(h1);
+
+            for (const auto& h2 : hands2){
+                std::vector<int> d2 = expand(h2);
+
+                // 두 칸에 규칙 할당(서로 다른 규칙)
+                for (int r1 : rules){
+                    int s1 = GameState::calculateScore((DiceRule)r1, d1);
+                    for (int r2 : rules){
+                        if (r2==r1) continue;
+                        int s2 = GameState::calculateScore((DiceRule)r2, d2);
+
+                        // 상단 보너스 (한 번만)
+                        int addUpper = (isUpper(r1)?s1:0) + (isUpper(r2)?s2:0);
+                        long long bonus = (currUpper < 63000 && currUpper + addUpper >= 63000) ? 35000 : 0;
+
+                        long long tot = (long long)s1 + s2 + bonus;
+                        if (tot > bestTot){
+                            bestTot = tot;
+                            bestD1 = d1; bestD2 = d2;
+                            bestR1 = r1; bestR2 = r2;
+
+                            // “지금 둘 수”를 첫 수로: 즉시 점수가 큰 걸 앞으로
+                            if (s2 > s1){
+                                std::swap(bestD1,bestD2);
+                                std::swap(bestR1,bestR2);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 결과 저장(= PUT 때 사용)
+        if (who=='A'){ myState.bestPutA = bestD1; myState.bestRuleA = bestR1; }
+        else         { myState.bestPutB = bestD1; myState.bestRuleB = bestR1; }
+
+        // 입찰 평가값으로는 “합산 점수”를 반환 (요구사항)
+        return static_cast<double>(bestTot);
     }
 
-    // ② 내가 선호와 반대인데 스윙도 작다 → 소액 견제 (3)
-    if ((myBestOther >= myBestChosen + PREF_GAP) && SW < 12000) {
-        return Bid{group, capByRound(3)};
-    }
+    };
 
-    // ③ 가치가 없으면 0
-    if (SW <= 0) return Bid{group, 0};
+    
 
-    // ==== 히스토리 보정/상대 예측 ====
-    auto clamp01 = [](double x, double lo, double hi){ return x<lo?lo:(x>hi?hi:x); };
+    
+    double preferdiceA=calprefer(diceA,myState,'A');
+    double preferdiceB=calprefer(diceB,myState,'B');
+    char bat = (preferdiceA > preferdiceB) ? 'A' : 'B';
 
-    int lead = myState.getTotalScore() - oppState.getTotalScore();
+    double preferdiceYoursA=calprefer(diceA,oppState,'A');
+    double preferdiceYoursB=calprefer(diceB,oppState,'B');
+    char yoursbat= (preferdiceYoursA > preferdiceYoursB) ? 'A' : 'B';
 
-    double selfW = SELF_W_BASE
-                 + (lead<0 ? min(SELF_W_NEG_GAIN, (-lead)/SCORE_SCALE)
-                           : -min(SELF_W_POS_LOSS,  (double)lead/SCORE_SCALE));
-    double oppW  = OPP_W_BASE
-                 + (lead>0 ? min(OPP_W_POS_GAIN,  (double)lead/SCORE_SCALE)
-                           : -min(OPP_W_NEG_LOSS, (-lead)/SCORE_SCALE));
-    selfW = clamp01(selfW, SELF_W_MIN, SELF_W_MAX);
-    oppW  = clamp01(oppW,  OPP_W_MIN,  OPP_W_MAX);
+    double amount=0;
+    int diff=abs(preferdiceA-preferdiceB),yoursdiff=abs(preferdiceYoursA-preferdiceYoursB);
 
-    // 보수화 스케일 적용
-    double aggrScale =
-        (lead > 0) ? AGGR_LEAD_SCALE :
-        (lead < 0) ? AGGR_BEHIND_SCALE : AGGR_TIE_SCALE;
-    if (roundNo <= 6) aggrScale *= EARLY_ROUND_AGGR_MULT;
 
-    long long myWTP  = (long long)((selfW * SW) * aggrScale); // ← 버그 수정: 자기 자신에 곱하던 걸 교정
-    long long oppEst = (long long)(oppW  * SW);
 
-    // 상대가 늘 낮게 내는 경향치만큼 같이 줄이기
-    auto underMargin = [&]()->int{
-        int n = (int)min(myBidHist.size(), oppBidHist.size());
-        if (n == 0) return 0;
-        vector<int> diffs; diffs.reserve(n);
-        for (int i=0;i<n;++i){
-            int d = myBidHist[i] - oppBidHist[i];
-            if (d > 0) diffs.push_back(d);
+
+    if(roundNo==4){
+        int lostnum=0,winnum;
+        int lostnumber=0;
+        int winnumber=0;
+        for(int i=1; i<invest.size(); i++){
+            if(invest[i]>0){
+                winnum++;
+                winnumber+=invest[i];
+            }
+            else{
+                lostnum++;
+                lostnumber-=invest[i];
+            }
         }
-        if (diffs.empty()) return 0;
-        sort(diffs.begin(), diffs.end());
-        int med = diffs[diffs.size()/2];
-        int avg = accumulate(diffs.begin(), diffs.end(), 0) / (int)diffs.size();
-        return max(med, avg);
-    };
-    int under = underMargin();
-    myWTP  = max(0LL, myWTP  - under);
-    oppEst = max(0LL, oppEst - under);
-
-    auto mean = [](const deque<int>& v)->double{
-        if (v.empty()) return 0.0; long long s=0; for (int x: v) s+=x; return (double)s / v.size();
-    };
-    auto median = [](deque<int> v)->double{
-        if (v.empty()) return 0.0;
-        vector<int> w(v.begin(), v.end());
-        nth_element(w.begin(), w.begin()+w.size()/2, w.end());
-        if (w.size()%2==1) return w[w.size()/2];
-        int a = *max_element(w.begin(), w.begin()+w.size()/2);
-        int b = w[w.size()/2];
-        return 0.5*(a+b);
-    };
-    auto ema = [](const deque<int>& v, double alpha)->double{
-        if (v.empty()) return 0.0;
-        double e = v.front();
-        for (int x: v) e = alpha * x + (1.0 - alpha) * e;
-        return e;
-    };
-    auto predictOppBid = [&]()->int{
-        if (oppBidHist.empty()) return 0;
-        int n = (int)oppBidHist.size();
-        int near0=0, near20=0;
-        for (int b: oppBidHist){ if (abs(b) <= 200) near0++; if (abs(b-20000) <= 800) near20++; }
-        if (near0  >= max(3, (int)(0.6*n))) return 0;
-        if (near20 >= max(3, (int)(0.6*n))) return 20000;
-        double pred = 0.4*ema(oppBidHist, 0.6) + 0.3*mean(oppBidHist) + 0.3*median(oppBidHist);
-        return (int)llround(pred);
-    };
-
-    int epsilon    = (int)max( (long long)EPSILON_MIN,
-                         min( (long long)EPSILON_MAX, (long long)(SW * EPSILON_RATIO) ) );
-    int habitDelta = (int)max( (long long)HABIT_DELTA_MIN,
-                         min( (long long)HABIT_DELTA_MAX, (long long)(SW * HABIT_DELTA_RATIO) ) );
-    long long target1 = oppEst + epsilon;
-    long long target2 = (long long)predictOppBid() + habitDelta;
-    long long targetWin = max(target1, target2);
-
-    bool finalRound = (roundNo >= 13);
-    if (finalRound) {
-        // 현재 총점(입찰점수 포함) 격차
-        long long myTot  = myState.getTotalScore();
-        long long oppTot = oppState.getTotalScore();
-        long long margin = myTot - oppTot; // >0이면 내가 앞서는 중
-
-        // 상대가 선호 팩을 가질 때의 "위협 값" (그 팩과 비선호 팩의 차이)
-        // - A/B 중 상대에게 더 큰 쪽을 주면 생기는 득점 차이를 rough 하게 본다
-        long long oppThreat = llabs((long long)oppBest_A - (long long)oppBest_B);
-
-        // 내가 낼 수 있는 '안전 견제 예산' = 지금 리드에서 최소 리드만 남기고 쓸 수 있는 금액
-        long long safeSpend = max(0LL, margin - (long long)FINAL_SAFE_MARGIN);
-
-        // 마지막 라운드에, 위협이 있고(=막을 가치가 있고) 안전 예산이 있으면
-        if (oppThreat > 0 && safeSpend > 0) {
-            // 상대 예상치 + ε, 상대 습관치 + δ, 그리고 내가 안전하게 쓸 수 있는 금액 중
-            // '이길 수 있는 만큼만, 그리고 안전하게'로 타깃을 잡는다.
-            long long safeTarget = min(myWTP, safeSpend);
-            long long needToWin  = max(target1, target2);   // (oppEst+ε) vs (habit+δ)
-            long long forceBid   = max(needToWin, safeTarget);
-
-            // 과투자 방지: 최종 상한 캡 적용
-            return Bid{group, capByRound(forceBid)};
+        if(winnumber<lostnumber){
+            gap=lostnumber/lostnumber;
+            if(gap>1200){
+                multiple*=1.1;
+                gap+=700;
+            }
+        }
+        if(winnumber>=3){
+            gap=winnumber/winnum;
+            gap=-gap*1.7;
         }
     }
+    if(roundNo==9){ //******************* */
+        int lostnum=0,winnum;
+        int lostnumber=0;
+        int winnumber=0;
+        for(int i=4; i<invest.size(); i++){
+            if(invest[i]>0){
+                winnum++;
+                winnumber+=invest[i];
+            }
+            else{
+                lostnum++;
+                lostnumber-=invest[i];
+            }
+        }
+        if(winnumber<lostnumber){
+            gap+=lostnumber/lostnumber;
+            if(gap>1200){
+                multiple*=1.1;
+            }
+            if(gap>2000){
+                multiple*=1.1;
+                gap-=1000;
+            }
+        }
+        if(winnumber>=5){
+            gap=winnumber/winnum;
+            gap-=gap;
+        }
+    }
+    if(roundNo==1){
+        max_my_bid=3212;
+        min_my_bid=203;
+        int oneMax=max_my_bid;
+        
+        diff=min(200,diff);
+        if(diff<=30){
+            amount =512;
+        }
+        else if(diff<=20){
+            amount =12;
+        }
+        else{
+            amount = diff/200*max_my_bid;
+            if(diff>110){
+                amount*=1.1;
+            }
+            if(diff>250){
+                amount *=1.1;
+            }
+        }
+        if(amount>1300){
+            amount*=1.3;
+        }
+        else{
+            amount+=300;
+        }
+        
+    }
+    else if(roundNo!=12){
+        if(bat=='A'){
+            if(myState.bestRuleA==FOUR_OF_A_KIND){
+                int temphap=0;
+                for(auto a:myState.bestPutA)temphap+=a;
+                if(temphap>20){
+                    diff +=50;
+                }
+            }
+        }
+        else{
+            if(myState.bestRuleB==FOUR_OF_A_KIND){
+                int temphap=0;
+                for(auto a:myState.bestPutB)temphap+=a;
+                if(temphap>20){
+                    diff +=50;
+                }
+            }
+        }
+        max_my_bid*=1.03;
+        predict.push_back(yoursbat);
+        double correctrate=0;
+        double bonmo=correct.size(),bonja=0;
+        for(int i=0; i<correct.size(); i++){
+            bonja++;
+        }
+        correctrate=bonja/bonmo*100;
 
-    long long amount = min(myWTP, targetWin);
-    return Bid{group, capByRound(amount)};
+        if(diff>1000)diff=1000;
+        if(yoursdiff>1000)yoursdiff=1000;
+        if(diff<30){
+            amount=min_my_bid+roundNo*12;
+        }
+        else{
+            amount=1-exp(-diff/500^2);
+            double x = std::fabs(diff) / 500.0;
+            double y = 1.0 - std::exp(-(x * x));
+            if (!std::isfinite(y)){
+                amount =max_my_bid;
+            };
+            amount=max_my_bid*clamp(y, 0.0, 1.0)*0.7;
+        }
+        if(amount<min_my_bid)amount=min_my_bid;
+        if(getOppBidAvg()<17)amount=17;
+        amount*=multiple+gap;
+        if(yoursbat!=bat){
+            amount*=0.7;
+        }
+
+        
+        if(diff>=800&& yoursdiff>800 && yoursbat==bat){
+            amount= max_my_bid*1.02;// 겹침 원하는게
+        }
+        else if(diff>=800){
+            amount= max_my_bid*1.02;
+        }
+        else if(diff<30&&(yoursdiff>800&&yoursbat!=bat)){
+            bat=yoursbat;
+            amount= max_my_bid*0.6;
+        }
+        
+        // cout<<"내가A 원하는정도: "<<preferdiceA<<"내가 B 원하는정도: "<<preferdiceB<<"\n";
+        // cout<<"상대가 A 원하는정도: "<<preferdiceYoursA<<"상대가 B 원하는정도: "<<preferdiceYoursB<<"\n";
+    }
+    else{
+        amount = diff;
+        int getA=preferdiceA-preferdiceYoursB;
+        int getB=preferdiceB-preferdiceYoursA;
+        int myscore=myState.getTotalScore();
+        int yourscore=oppState.getTotalScore();
+        
+        // A를 선택했을때
+        int mytargetAscore=myscore+preferdiceA;
+        int yourtargetBscore=yourscore+preferdiceYoursB;
+        
+        Bid choiceA{'C',0}, choiceB{'C',0};
+        if(mytargetAscore>=yourtargetBscore){// A를 뽑으면 내가 이기는 상태임
+            choiceA.group='A';
+            choiceA.amount=(mytargetAscore-yourtargetBscore-1)/2;
+        }
+        // B를 선택했을때
+        int mytargetBscore=myscore+preferdiceB;
+        int yourtargetAscore=yourscore+preferdiceYoursA;
+        if(mytargetBscore>=yourtargetAscore){
+            choiceB.group='B';
+            choiceB.amount=(mytargetBscore-yourtargetAscore-1)/2;
+        }
+        // cout<<mytargetAscore<<"a선택 점수 "<<yourtargetBscore<<"\n";
+        // cout<<mytargetBscore<<"b선택 점수 "<<yourtargetAscore<<"\n";
+        if(choiceA.group=='A'&& choiceB.group=='B'){ // 서로 자신이 이길수 있다고 주장중임
+            if(choiceA.amount>choiceB.amount){
+                bat='B';
+                amount=choiceB.amount;
+            }
+            else{
+                bat='A';
+                amount=choiceA.amount;
+            }
+
+        }
+        else if(choiceA.group=='A'|| choiceB.group=='B'){// 둘중 하나는 내가 고르면 이긴다고 주장중임
+            if(choiceA.group=='A'){
+                bat='A';
+                amount=choiceA.amount;
+            }
+            else{
+                bat='B';
+                amount=choiceB.amount;
+            }
+        }
+        else{// 둘다 골라도 지는것임;; 암물함-> 상대가 더 좋은 것을 내가 손해인 점수 만큼 얻어서 극복하자
+            if(preferdiceYoursA>preferdiceYoursB){
+                bat='A';
+                amount =abs(yourtargetAscore-mytargetBscore)/2+3;
+            }
+            else{
+                bat='B';
+                amount =abs(mytargetAscore-yourtargetBscore)/2+3;
+            }
+            if(amount>getOppBidMinMax(true).second*1.3){
+                amount=getOppBidMinMax(true).second*1.3+500;
+            }
+            // cout<<"d여기인가?\n";
+        }
+        
+
+    }
+
+    if(amount<min_my_bid)amount=min_my_bid;
+    if(amount>13000&& roundNo!=12) amount=12000;
+    if(amount>100000)amount=100000;
+    if(roundNo>3&&getOppBidAvg(true)==0&&roundNo<=10)amount=17;
+    if(getOppBidMinMax(true).second*1.1<amount)amount*=0.9;
+    if(sameDice(diceA,diceB))amount=0;
+    mywant=bat;
+    mybid=int(amount);
+    return Bid{bat,0};
 }
-
-
-
 
 
     // ======== 배치 전략 (항상 5개 출력, cnt 기반으로 빠르게) ========
 
 DicePut calculatePut() {
-    if (!planned.empty()) { auto out = planned.front(); planned.pop_front(); return out;}
+    // bestPutA, bestPutB;
+    // mutable int bestRuleA = -1, bestRuleB = -1;
+
     vector<int> usable;
+    for (int r = 0; r < 12; ++r) if (myState.ruleScore[r] == -1) usable.push_back(r);
+    if(usable.size()==1){
+        vector<int> dice;
+        for(int i=1; i<=6; i++){
+            for(int j=0; j<myState.cnt[i]; j++){
+                dice.push_back(i);
+            }
+        }
+        return DicePut{(DiceRule)usable[0], dice};
+    }
+        
+    if(myState.now=='A'){
+        return DicePut{ (DiceRule)myState.bestRuleA, myState.bestPutA };
+    }
+    else{
+        return DicePut{ (DiceRule)myState.bestRuleB, myState.bestPutB };
+    }
+    if (!planned.empty()) { auto out = planned.front(); planned.pop_front(); return out;}
     for (int r = 0; r < 12; ++r) if (myState.ruleScore[r] == -1) usable.push_back(r);
     if (usable.empty()) return DicePut{ONE, {}};
 
@@ -901,11 +1577,31 @@ if (early){
 
     // 상태 업데이트들 (원본과 동일)
     void updateGet(vector<int> diceA, vector<int> diceB, Bid myBid, Bid oppBid, char myGroup) {
-        if (myGroup == 'A')
+        if (myGroup == 'A'){
             myState.addDice(diceA), oppState.addDice(diceB);
-        else
+            myState.now='A';
+        }
+        else{
             myState.addDice(diceB), oppState.addDice(diceA);
-
+            myState.now='B';
+        }
+        // if(predict[roundNo]==oppBid.group){
+        //     correct.push_back(true);
+        // }
+        // else{
+        //     correct.push_back(false);
+        // }
+        if(mywant==myGroup){// 낙찰 성공
+            int youamount=0;
+            if(oppBid.group==mywant){
+                youamount=oppBid.amount;
+            }
+            invest.push_back(mybid-youamount);
+        }
+        else{// 낙찰 실패
+            invest.push_back(oppBid.amount-mybid);
+        }
+        
         bool myBidOk = myBid.group == myGroup;
         myState.bid(myBidOk, myBid.amount);
 

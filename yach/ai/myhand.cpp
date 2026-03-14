@@ -51,27 +51,136 @@ class Game {
     GameState oppState;  // 상대 팀 상태
 
     // ======== 입찰 전략 ========
-    Bid calculateBid(const vector<int>& diceA, const vector<int>& diceB) {
-        int sumA = accumulate(diceA.begin(), diceA.end(), 0);
-        int sumB = accumulate(diceB.begin(), diceB.end(), 0);
-        char group = (sumA > sumB) ? 'A' : (sumB > sumA ? 'B' : 'A'); // 동률이면 A
+    // ======== 입찰 전략: 즉시 가치 + 보너스 + 견제 기반 ========
+Bid calculateBid(const vector<int>& diceA, const vector<int>& diceB) {
+    auto evalBest = [&](const GameState& base, const vector<int>& add)->int {
+        // base 상태에 add 주사위를 더했을 때 바로 낼 수 있는 최고 "가치" (raw + 보너스 즉시 달성 가산)
+        array<int,7> C = base.cnt;
+        for (int d : add) if (1<=d && d<=6) C[d]++;
 
-        int sumDiff = abs(sumA - sumB);                 // 0~30
-        int lead    = myState.getTotalScore() - oppState.getTotalScore();
+        auto fillToFive = [&](vector<int> v){
+            array<int,7> tmp=C;
+            for(int x:v){ if(!(1<=x&&x<=6) || tmp[x]==0) return vector<int>{}; tmp[x]--; }
+            for(int f=6; f>=1 && (int)v.size()<5; --f) while(tmp[f]>0 && (int)v.size()<5){ v.push_back(f); tmp[f]--; }
+            return (int)v.size()==5 ? v : vector<int>{};
+        };
+        auto top5 = [&](){
+            vector<int> v; v.reserve(5);
+            for(int f=6; f>=1 && (int)v.size()<5; --f){
+                int take=min(C[f], 5-(int)v.size());
+                for(int i=0;i<take;i++) v.push_back(f);
+            }
+            return v;
+        };
+        auto selYacht = [&](){
+            for(int f=1; f<=6; ++f) if(C[f]>=5) return vector<int>(5,f);
+            return vector<int>{};
+        };
+        auto selLarge = [&](){
+            int a[5]={1,2,3,4,5}, b[5]={2,3,4,5,6};
+            auto ok=[&](int* s){ for(int i=0;i<5;i++) if(C[s[i]]==0) return false; return true; };
+            if(ok(a)) return vector<int>{1,2,3,4,5};
+            if(ok(b)) return vector<int>{2,3,4,5,6};
+            return vector<int>{};
+        };
+        auto selSmall = [&](){
+            int a[4]={1,2,3,4}, b[4]={2,3,4,5}, c[4]={3,4,5,6};
+            auto ok=[&](int* s){ for(int i=0;i<4;i++) if(C[s[i]]==0) return false; return true; };
+            if(ok(a)) return vector<int>{1,2,3,4};
+            if(ok(b)) return vector<int>{2,3,4,5};
+            if(ok(c)) return vector<int>{3,4,5,6};
+            return vector<int>{};
+        };
+        auto selFour = [&](){
+            for(int f=6; f>=1; --f) if(C[f]>=4){
+                int kick=-1; for(int k=6;k>=1;--k) if(k!=f && C[k]>0){ kick=k; break; }
+                if(kick==-1) kick=f;
+                return vector<int>{f,f,f,f,kick};
+            }
+            return vector<int>{};
+        };
+        auto selFull = [&](){
+            for(int f=1; f<=6; ++f) if(C[f]==5) return vector<int>(5,f);
+            int tri=-1,pairv=-1;
+            for(int f=6; f>=1; --f) if(C[f]>=3){ tri=f; break; }
+            for(int f=6; f>=1; --f) if(f!=tri && C[f]>=2){ pairv=f; break; }
+            if(tri!=-1 && pairv!=-1) return vector<int>{tri,tri,tri,pairv,pairv};
+            return vector<int>{};
+        };
+        auto selUpper = [&](int face){
+            int use=min(5,C[face]); vector<int> v(use, face);
+            return v;
+        };
+        auto usable = [&](DiceRule r){ return base.ruleScore[r]==-1; };
 
-        long long base = (sumDiff <= 2 ? 0 : (sumDiff - 2) * 200LL); // 보수적
-        long long adjust = (lead >= 0 ? -(lead / 40) : (-lead) / 20);
-        long long amount = base + adjust;
-        if(amount>1000){
-            amount-=501;
-        }
-        if (amount < 0) amount = 0;
-        if (amount > 100000) amount = 100000;
-        return Bid{group, (int)amount};
-    }
+        int best = 0; // 최고 가치
+        auto consider = [&](DiceRule r, vector<int> v, bool needFill){
+            if (!usable(r)) return;
+            if (v.empty() && !(ONE<=r && r<=SIX)) return;
+            if (needFill) v = fillToFive(v);
+            if (v.empty()) return;
+            int raw = GameState::calculateScore(r, v);
+
+            // 이번 한 수로 상단 보너스 즉시 달성 시 +35k 가산
+            int currUpper = 0;
+            for (int i=0;i<6;i++) if (base.ruleScore[i]!=-1) currUpper += base.ruleScore[i];
+            if (ONE<=r && r<=SIX && currUpper + raw >= 63000) raw += 35000;
+
+            best = max(best, raw);
+        };
+
+        consider(YACHT,          selYacht(),        false);
+        consider(LARGE_STRAIGHT, selLarge(),        false);
+        consider(FOUR_OF_A_KIND, selFour(),         false);
+        consider(FULL_HOUSE,     selFull(),         false);
+        consider(SMALL_STRAIGHT, selSmall(),        true);
+        consider(CHOICE,         top5(),            false);
+        for(int f=6; f>=1; --f) consider((DiceRule)(f-1), selUpper(f), true);
+
+        return best;
+    };
+
+    // 내 관점에서의 즉시 가치
+    int vA = evalBest(myState, diceA);
+    int vB = evalBest(myState, diceB);
+
+    // 상대가 가져가게 되는 반대 그룹의 가치(견제 효과)
+    int oppIfIA = evalBest(oppState, diceB); // 내가 A를 먹으면 상대는 B
+    int oppIfIB = evalBest(oppState, diceA); // 내가 B를 먹으면 상대는 A
+    int denyA = max(0, oppIfIB - oppIfIA);   // A를 택하면 상대가 잃는 가치
+    int denyB = max(0, oppIfIA - oppIfIB);   // B를 택하면 상대가 잃는 가치
+
+    // 선택: 내 가치 + 일부 견제효과가 큰 쪽
+    int scoreA = vA + denyA/2;  // 견제는 절반만 반영(안정적)
+    int scoreB = vB + denyB/2;
+    char group = (scoreA >= scoreB ? 'A' : 'B');
+
+    int myBest   = max(scoreA, scoreB);
+    int myOther  = min(scoreA, scoreB);
+    int margin   = max(0, myBest - myOther);          // 유효 격차(점수 단위)
+
+    // 리드/라운드에 따른 공격성
+    int lead = myState.getTotalScore() - oppState.getTotalScore();
+    int rulesLeft = 0; for(int r=0;r<12;++r) if(myState.ruleScore[r]==-1) ++rulesLeft;
+    double stage   = 0.4 + 0.6 * (rulesLeft / 12.0);  // 초기 1.0, 말미 0.4
+    double behind  = (lead<0) ? min(0.6, (-lead)/120000.0) : -min(0.4, lead/180000.0);
+    double aggro   = 1.0 + behind;                    // 뒤지면 ↑, 앞서면 ↓
+
+    // 금액 매핑: 작은 격차면 0, 큰 격차일수록 선형↑, 상한 100k
+    const int   THRESH = 3000;   // 최소 유효차(점수)
+    const double SCALE = 1.6;    // 점수→금액 스케일
+    double edge = (margin > THRESH) ? (margin - THRESH) : 0.0;
+    long long amount = (long long)(edge * SCALE * aggro * stage);
+
+    if (amount < 0) amount = 0;
+    if (amount > 100000) amount = 100000;
+    return Bid{group, (int)amount};
+}
+
 
     // ======== 배치 전략 (항상 5개 출력, cnt 기반으로 빠르게) ========
-
+    // ======== 배치 전략 (항상 5개 출력, cnt 기반으로 빠르게) ========
+// ======== 배치 전략 (항상 5개 출력, cnt 기반으로 빠르게) ========
 DicePut calculatePut() {
     vector<int> usable;
     for (int r = 0; r < 12; ++r) if (myState.ruleScore[r] == -1) usable.push_back(r);
@@ -266,32 +375,26 @@ DicePut calculatePut() {
     }
 
     // 2) 풀하우스가 '트리플로 쓰인 얼굴'의 상단 칸이 비어 있으면 강하게 컷
-    int rulesLeftLate = 0; for (int r=0; r<12; ++r) if (myState.ruleScore[r]==-1) ++rulesLeftLate;
-    bool late9 = (rulesLeftLate <= 3);
-
-    // 2) 풀하우스 강한 금지(초중반만), 후반엔 완화
     for (auto &c : cs) {
         if (c.r != FULL_HOUSE) continue;
 
-        std::array<int,7> used{}; for (int d : c.use) if (1<=d && d<=6) used[d]++;
-        int triFace = -1; for (int f=1; f<=6; ++f) if (used[f] >= 3) { triFace = f; break; }
-        if (triFace == -1) continue;
+        std::array<int,7> used{}; 
+        for (int d : c.use) if (1<=d && d<=6) used[d]++;
 
-        if (!late9) { // 초중반: 강하게 컷
-            const int KILL_FH_IF_TRIPLE_OPEN = 100000;
-            const int EXTRA_KILL_IF_USE_2_5  = 10000;
-            if (myState.ruleScore[triFace-1] == -1) {
-                c.eff -= KILL_FH_IF_TRIPLE_OPEN;
-                bool straightAlive = (myState.ruleScore[SMALL_STRAIGHT]==-1 || myState.ruleScore[LARGE_STRAIGHT]==-1);
-                if (straightAlive) {
-                    int critUse = used[2] + used[3] + used[4] + used[5];
-                    if (critUse > 0) c.eff -= EXTRA_KILL_IF_USE_2_5;
-                }
+        // 트리플이 어떤 face인지 찾기
+        int triFace = -1;
+        for (int f=1; f<=6; ++f) if (used[f] >= 3) { triFace = f; break; }
+        if (triFace == -1) continue; // 안전장치
+
+        // 그 face의 상단 칸이 비어 있으면 풀하우스 거의 금지
+        if (myState.ruleScore[triFace-1] == -1) {
+            c.eff -= KILL_FH_IF_TRIPLE_OPEN;
+
+            // 스트레이트 살아있고, 풀하우스가 2~5를 소모하면 추가로 더 감점
+            if (straightAlive) {
+                int critUse = used[2] + used[3] + used[4] + used[5];
+                if (critUse > 0) c.eff -= EXTRA_KILL_IF_USE_2_5;
             }
-        } else {
-            // 후반(라운드 9+): 금지 해제, 약한 페널티만 남김
-            const int SOFT_PENALTY_LATE = 3000;
-            if (myState.ruleScore[triFace-1] == -1) c.eff -= SOFT_PENALTY_LATE;
         }
     }
 
@@ -351,7 +454,7 @@ DicePut calculatePut() {
 
     // 라운드가 거의 끝나가면(남은 칸 적음) 덤프 성향을 더 강화
     int rulesLeft = 0; for (int r=0; r<12; ++r) if (myState.ruleScore[r]==-1) ++rulesLeft;
-    bool lateGame = (rulesLeft <= 2);
+    bool lateGame = (rulesLeft <= 3);
 
     if (dumpModeGlobal || lateGame) {
         const int DUMP_FACE_PENALTY_PER_PIP = 3000; // 얼굴값이 클수록 감점(고눈 아끼기)
@@ -370,22 +473,93 @@ DicePut calculatePut() {
             }
         }
     }
-    int rulesLeft = 0; for (int r=0; r<12; ++r) if (myState.ruleScore[r]==-1) ++rulesLeft;
-    int lateTier = (rulesLeft <= 2 ? 3 : rulesLeft <= 3 ? 2 : rulesLeft <= 4 ? 1 : 0);
-    if (lateTier > 0) {
-        // 단계별 부스트 (필요시 조절)
-        const int BOOST4[4] = { 0, 7000, 11000, 15000 };  // 4kind
-        const int BOOSTF[4] = { 0, 6000,  9000, 12000 };  // Full House
+    // === (C4) SMALL_STRAIGHT(4연속) 강제 우선 규칙 ===
+    // 라지 불가 + 스몰 가능(4연속 포함)이면 스몰에 강한 보정
+    auto isSmallPattern = [&](const vector<int>& d)->bool{
+        // d(채워진 5개) 안에 1-2-3-4 / 2-3-4-5 / 3-4-5-6 중 하나가 포함되는지 체크
+        array<int,7> u{}; for (int x : d) if (1<=x && x<=6) u[x]=1;
+        bool a = u[1]&&u[2]&&u[3]&&u[4];
+        bool b = u[2]&&u[3]&&u[4]&&u[5];
+        bool c = u[3]&&u[4]&&u[5]&&u[6];
+        return a||b||c;
+    };
 
-        for (auto &c : cs) {
-            if (c.r == FOUR_OF_A_KIND && myState.ruleScore[FOUR_OF_A_KIND]==-1) {
-                if (c.raw >= 14000) c.eff += BOOST4[lateTier];  // 너무 허접한 4kind는 제외
-            }
-            if (c.r == FULL_HOUSE && myState.ruleScore[FULL_HOUSE]==-1) {
-                if (c.raw >= 15000) c.eff += BOOSTF[lateTier];  // 16k 같은 저득점은 과도 승격 방지
+    int idxSmall = -1;
+    bool hasLarge = false;
+    for (int i=0;i<(int)cs.size();++i){
+        if (cs[i].r == SMALL_STRAIGHT && isSmallPattern(cs[i].use)) idxSmall = i;
+        if (cs[i].r == LARGE_STRAIGHT) hasLarge = true;
+    }
+
+    if (idxSmall != -1 && !hasLarge) {
+        // 스몰이 상단이나 다른 콤보에 밀리지 않도록 강하게 밀어줌
+        const int SMALL4_FORCE = 14000;     // 튜닝 포인트: 10k~18k 사이 권장
+        cs[idxSmall].eff += SMALL4_FORCE;
+
+        // (선택) 동시에 애매한 상단(1~2개만 쓰는 상단)은 살짝 눌러준다
+        for (auto &c : cs){
+            if (c.r>=ONE && c.r<=SIX){
+                int face = c.r+1, used=0; for(int d: c.use) if(d==face) ++used;
+                if (used <= 2) c.eff -= 4000; // 약한 상단 감점
             }
         }
     }
+    // === (C5) 저득점 FULL_HOUSE 강한 회피 규칙 ===
+    // 18k 미만(합<18) 풀하우스는 가급적 피하고, 상단/스몰/CHOICE로 유도
+    const int FH_FLOOR                = 18000;  // 이 값 미만이면 약함
+    const int FH_LOW_BASE             = 6000;   // 기본 패널티
+    const int FH_TRI_OPEN_PENALTY     = 9000;   // 트리플의 상단 칸이 비었으면 추가 패널티
+    const int FH_PAIR_OPEN_PENALTY    = 4000;   // 페어 얼굴 상단 칸 비었으면 추가
+    const int FH_STRAIGHT_CRIT_PENAL  = 4000;   // {2,3,4,5} 소모시(스몰/라지 살아있으면) 추가
+    const int FH_CHOICE_NEAR_MARGIN   = 2000;   // CHOICE와 점수 차가 이 이하면
+    const int FH_CHOICE_NEAR_PENALTY  = 5000;   // CHOICE 쪽으로 기울이기
+    const int FH_LATE_SOFTEN          = 3000;   // 막턴(남은 칸<=2)엔 살짝 완화
+
+    // CHOICE 최고 raw를 미리 구해 CHOICE와 근접하면 FH를 더 깎기
+    int bestChoiceRaw = -1;
+    for (auto &c : cs) if (c.r == CHOICE) bestChoiceRaw = max(bestChoiceRaw, c.raw);
+
+
+
+    for (auto &c : cs) {
+        if (c.r != FULL_HOUSE) continue;
+
+        int fhRaw = c.raw; // FULL_HOUSE는 합*1000
+        array<int,7> used{}; for (int d: c.use) if (1<=d && d<=6) used[d]++;
+
+        // 트리플/페이스 찾기(5-of-a-kind를 FULL로 인정하는 규칙 고려)
+        int triFace=-1, pairFace=-1;
+        for (int f=1; f<=6; ++f){
+            if (used[f]==5){ triFace=f; pairFace=f; }
+            else if (used[f]==3){ triFace=f; }
+            else if (used[f]==2){ pairFace=f; }
+        }
+
+        int penalty = 0;
+
+        // 1) 점수 하한 미만이면 기본 + (부족분)만큼 추가 패널티
+        if (fhRaw < FH_FLOOR) penalty += FH_LOW_BASE + (FH_FLOOR - fhRaw);
+
+        // 2) 상단 칸이 열려 있으면 더 큰 패널티(트리플>페어)
+        if (triFace!=-1 && myState.ruleScore[triFace-1]==-1) penalty += FH_TRI_OPEN_PENALTY;
+        if (pairFace!=-1 && myState.ruleScore[pairFace-1]==-1) penalty += FH_PAIR_OPEN_PENALTY;
+
+        // 3) 스몰/라지 살아있고 {2,3,4,5}를 소모하면 추가 패널티
+        if (straightAlive){
+            int critUse = used[2]+used[3]+used[4]+used[5];
+            if (critUse > 0) penalty += FH_STRAIGHT_CRIT_PENAL;
+        }
+
+        // 4) CHOICE랑 비슷하면 FH 더 깎아서 CHOICE 선택 유도
+        if (bestChoiceRaw!=-1 && bestChoiceRaw >= fhRaw - FH_CHOICE_NEAR_MARGIN)
+            penalty += FH_CHOICE_NEAR_PENALTY;
+
+        // 5) 막턴이면 약간 완화(채워야 할 수 있으니)
+        if (lateGame) penalty -= FH_LATE_SOFTEN;
+
+        c.eff -= penalty;
+    }
+
 
 
 
