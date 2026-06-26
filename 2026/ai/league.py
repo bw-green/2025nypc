@@ -30,7 +30,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import referee
 
-BOTS = ["18913", "19405", "19931", "19941"]
+BOTS = ["20134", "19405", "19931", "20138"]
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -200,11 +200,11 @@ def main():
     out.append("")
     out.append("[순위표]  승점 = 승2·무1·패0")
     out.append(f"{'순위':<4}{'봇':<8}{'승점':>5}{'승':>5}{'무':>5}{'패':>5}"
-               f"{'결정승률':>10}{'평균칸':>8}")
+               f"{'승률':>10}{'평균칸':>8}")
     order = sorted(BOTS, key=lambda n: (pts[n], wins[n]), reverse=True)
     for rank, n in enumerate(order, 1):
-        dec = wins[n] + losses[n]
-        wr = wins[n] / dec * 100 if dec else 0.0
+        played = wins[n] + draws[n] + losses[n]   # 무승부 포함 전체 게임
+        wr = wins[n] / played * 100 if played else 0.0
         avg = cells_for[n] / cells_games[n] if cells_games[n] else 0.0
         out.append(f"{rank:<4}{n:<8}{pts[n]:>5}{wins[n]:>5}{draws[n]:>5}{losses[n]:>5}"
                    f"{wr:>9.1f}%{avg:>8.1f}")
