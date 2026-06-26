@@ -269,7 +269,7 @@ def play_game(cmd_first, cmd_second, rows, total_ms, grace_ms,
             bots[other].send(
                 f"OPP {mv[0]} {mv[1]} {mv[2]} {mv[3]} {int(elapsed_ms)}"
             )
-            moves.append((turn, mv))
+            moves.append((turn, mv, int(elapsed_ms)))
             turn = other
 
         a, b = st.score()
