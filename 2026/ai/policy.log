@@ -1,0 +1,28 @@
+# device=cuda
+# 데이터 로딩...
+# train=15007 test=3840 samples
+ep    1 loss=9.343  test_move_acc= 13.5%  best= 13.5%
+ep   10 loss=7.687  test_move_acc= 12.0%  best= 13.5%
+ep   20 loss=3.342  test_move_acc= 11.3%  best= 13.5%
+ep   30 loss=1.720  test_move_acc= 11.1%  best= 13.5%
+ep   40 loss=0.946  test_move_acc= 11.4%  best= 13.5%
+ep   50 loss=0.847  test_move_acc= 10.9%  best= 13.5%
+ep   60 loss=0.475  test_move_acc= 12.1%  best= 13.5%
+ep   70 loss=0.425  test_move_acc= 10.7%  best= 13.5%
+ep   80 loss=0.225  test_move_acc= 12.1%  best= 13.5%
+ep   90 loss=0.320  test_move_acc= 11.0%  best= 13.5%
+ep  100 loss=0.614  test_move_acc= 11.8%  best= 13.5%
+ep  110 loss=0.291  test_move_acc= 11.1%  best= 13.5%
+ep  120 loss=0.739  test_move_acc= 11.6%  best= 13.5%
+ep  130 loss=0.213  test_move_acc= 11.7%  best= 13.5%
+ep  140 loss=0.177  test_move_acc= 11.0%  best= 13.5%
+ep  150 loss=0.301  test_move_acc= 10.9%  best= 13.5%
+ep  160 loss=0.130  test_move_acc= 11.3%  best= 13.5%
+ep  170 loss=0.392  test_move_acc= 11.5%  best= 13.5%
+ep  180 loss=0.120  test_move_acc= 11.7%  best= 13.5%
+ep  190 loss=0.301  test_move_acc= 11.8%  best= 13.5%
+ep  200 loss=0.140  test_move_acc= 11.7%  best= 13.5%
+ep  210 loss=0.424  test_move_acc= 12.0%  best= 13.5%
+ep  220 loss=0.022  test_move_acc= 11.7%  best= 13.5%
+ep  230 loss=0.001  test_move_acc= 11.7%  best= 13.5%
+ep  240 loss=0.000  test_move_acc= 11.5%  best= 13.5%

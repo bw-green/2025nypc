@@ -1,0 +1,54 @@
+# init from learned_weights.txt
+# ES-linear gens=400 pop=16 games=24 depth=3
+gen   1 champ마진(공통맵)=+8.46 sigma=0.0599 23.7s  [vs_strong 승률=45.0% 마진=-1.35 best=45.0%]
+gen   2 champ마진(공통맵)=-1.54 sigma=0.0599 22.5s
+gen   3 champ마진(공통맵)=+2.25 sigma=0.0598 22.1s
+gen   4 champ마진(공통맵)=-4.92 sigma=0.0598 19.2s
+gen   5 champ마진(공통맵)=+0.38 sigma=0.0597 19.6s
+gen   6 champ마진(공통맵)=-1.50 sigma=0.0596 20.0s
+gen   7 champ마진(공통맵)=+0.88 sigma=0.0596 20.1s
+gen   8 champ마진(공통맵)=-3.25 sigma=0.0595 20.1s
+gen   9 champ마진(공통맵)=-1.17 sigma=0.0595 19.4s
+gen  10 champ마진(공통맵)=+1.12 sigma=0.0594 22.9s  [vs_strong 승률=44.6% 마진=-0.25 best=45.0%]
+gen  11 champ마진(공통맵)=+1.62 sigma=0.0593 20.1s
+gen  12 champ마진(공통맵)=+5.46 sigma=0.0593 19.7s
+gen  13 champ마진(공통맵)=+3.62 sigma=0.0592 19.1s
+gen  14 champ마진(공통맵)=+8.04 sigma=0.0592 20.0s
+gen  15 champ마진(공통맵)=+6.00 sigma=0.0591 20.3s
+gen  16 champ마진(공통맵)=+7.83 sigma=0.0590 20.5s
+gen  17 champ마진(공통맵)=-0.38 sigma=0.0590 20.1s
+gen  18 champ마진(공통맵)=+3.71 sigma=0.0589 20.0s
+gen  19 champ마진(공통맵)=+4.21 sigma=0.0589 22.2s
+gen  20 champ마진(공통맵)=+1.50 sigma=0.0588 23.6s  [vs_strong 승률=47.4% 마진=-1.95 best=47.4%]
+gen  21 champ마진(공통맵)=-2.46 sigma=0.0588 21.0s
+gen  22 champ마진(공통맵)=+1.00 sigma=0.0587 19.7s
+gen  23 champ마진(공통맵)=+0.29 sigma=0.0586 22.1s
+gen  24 champ마진(공통맵)=+4.00 sigma=0.0586 20.1s
+gen  25 champ마진(공통맵)=-0.29 sigma=0.0585 20.8s
+gen  26 champ마진(공통맵)=+0.33 sigma=0.0585 21.1s
+gen  27 champ마진(공통맵)=+0.25 sigma=0.0584 20.7s
+gen  28 champ마진(공통맵)=+0.83 sigma=0.0583 19.2s
+gen  29 champ마진(공통맵)=-1.54 sigma=0.0583 20.8s
+gen  30 champ마진(공통맵)=+2.38 sigma=0.0582 23.3s  [vs_strong 승률=44.6% 마진=-1.38 best=47.4%]
+gen  31 champ마진(공통맵)=+3.71 sigma=0.0582 20.1s
+gen  32 champ마진(공통맵)=+5.50 sigma=0.0581 19.9s
+gen  33 champ마진(공통맵)=+0.25 sigma=0.0581 22.2s
+gen  34 champ마진(공통맵)=+1.92 sigma=0.0580 21.7s
+gen  35 champ마진(공통맵)=+4.96 sigma=0.0579 20.6s
+gen  36 champ마진(공통맵)=+5.88 sigma=0.0579 19.5s
+gen  37 champ마진(공통맵)=-5.38 sigma=0.0578 20.4s
+gen  38 champ마진(공통맵)=-0.88 sigma=0.0578 20.8s
+gen  39 champ마진(공통맵)=+3.96 sigma=0.0577 22.6s
+gen  40 champ마진(공통맵)=+0.08 sigma=0.0576 24.8s  [vs_strong 승률=50.9% 마진=-0.22 best=50.9%]
+gen  41 champ마진(공통맵)=-0.17 sigma=0.0576 19.7s
+gen  42 champ마진(공통맵)=+4.83 sigma=0.0575 22.5s
+gen  43 champ마진(공통맵)=-0.67 sigma=0.0575 20.3s
+gen  44 champ마진(공통맵)=+4.67 sigma=0.0574 21.4s
+gen  45 champ마진(공통맵)=+4.50 sigma=0.0574 20.5s
+gen  46 champ마진(공통맵)=+0.67 sigma=0.0573 18.7s
+gen  47 champ마진(공통맵)=+3.75 sigma=0.0572 20.4s
+gen  48 champ마진(공통맵)=-2.79 sigma=0.0572 19.0s
+gen  49 champ마진(공통맵)=+0.17 sigma=0.0571 21.3s
+gen  50 champ마진(공통맵)=+1.62 sigma=0.0571 25.1s  [vs_strong 승률=48.2% 마진=-0.33 best=50.9%]
+gen  51 champ마진(공통맵)=+1.96 sigma=0.0570 20.4s
+gen  52 champ마진(공통맵)=+3.25 sigma=0.0570 20.5s

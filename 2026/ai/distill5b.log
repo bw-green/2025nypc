@@ -1,0 +1,29 @@
+# device=cuda  NVIDIA GeForce RTX 4070 Ti SUPER
+# 데이터 320,007 위치 생성  (440.8s)
+ep   1  val_mse=11.92963  best=11.92963 *best
+ep   2  val_mse=10.59965  best=10.59965 *best
+ep   3  val_mse=10.28744  best=10.28744 *best
+ep   4  val_mse=10.06455  best=10.06455 *best
+ep   5  val_mse=9.92930  best=9.92930 *best
+ep   6  val_mse=9.81079  best=9.81079 *best
+ep   7  val_mse=9.73759  best=9.73759 *best
+ep   8  val_mse=9.68570  best=9.68570 *best
+ep  10  val_mse=9.68353  best=9.68353 *best
+ep  11  val_mse=9.63502  best=9.63502 *best
+ep  12  val_mse=9.58039  best=9.58039 *best
+ep  15  val_mse=9.54169  best=9.54169 *best
+ep  18  val_mse=9.44836  best=9.44836 *best
+ep  19  val_mse=9.41712  best=9.41712 *best
+ep  20  val_mse=9.45177  best=9.41712
+ep  25  val_mse=9.45210  best=9.41712
+ep  30  val_mse=9.50568  best=9.41712
+ep  31  val_mse=9.39062  best=9.39062 *best
+ep  35  val_mse=9.46016  best=9.39062
+ep  40  val_mse=9.41873  best=9.39062
+ep  42  val_mse=9.37277  best=9.37277 *best
+ep  45  val_mse=9.37704  best=9.37277
+ep  50  val_mse=9.40220  best=9.37277
+# 조기종료 (val 9.37277)
+# 벤치마크 vs bot_strong (랜덤 60판, 학습 미사용 맵)...
+# vs_strong 승/무/패 = 17/2/41   승률 = 29.3%
+# 가중치 -> nnue_weights.txt  (val_mse=9.37277)

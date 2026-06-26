@@ -1,0 +1,52 @@
+# device=cuda  NVIDIA GeForce RTX 4070 Ti SUPER
+# 데이터 320,007 위치 생성  (20.1s)
+ep   1  val_mse=0.04629  best=0.04629 *best
+ep   2  val_mse=0.00736  best=0.00736 *best
+ep   3  val_mse=0.00460  best=0.00460 *best
+ep   4  val_mse=0.00321  best=0.00321 *best
+ep   5  val_mse=0.00438  best=0.00321
+ep   6  val_mse=0.00207  best=0.00207 *best
+ep   7  val_mse=0.00163  best=0.00163 *best
+ep   8  val_mse=0.00149  best=0.00149 *best
+ep   9  val_mse=0.00135  best=0.00135 *best
+ep  10  val_mse=0.00111  best=0.00111 *best
+ep  11  val_mse=0.00102  best=0.00102 *best
+ep  13  val_mse=0.00086  best=0.00086 *best
+ep  15  val_mse=0.00077  best=0.00077 *best
+ep  18  val_mse=0.00063  best=0.00063 *best
+ep  20  val_mse=0.00072  best=0.00063
+ep  22  val_mse=0.00058  best=0.00058 *best
+ep  23  val_mse=0.00055  best=0.00055 *best
+ep  24  val_mse=0.00050  best=0.00050 *best
+ep  25  val_mse=0.00045  best=0.00045 *best
+ep  30  val_mse=0.00048  best=0.00045
+ep  32  val_mse=0.00032  best=0.00032 *best
+ep  35  val_mse=0.00047  best=0.00032
+ep  36  val_mse=0.00030  best=0.00030 *best
+ep  37  val_mse=0.00030  best=0.00030 *best
+ep  40  val_mse=0.00029  best=0.00029 *best
+ep  43  val_mse=0.00029  best=0.00029 *best
+ep  45  val_mse=0.00031  best=0.00029
+ep  46  val_mse=0.00028  best=0.00028 *best
+ep  50  val_mse=0.00029  best=0.00028
+ep  52  val_mse=0.00026  best=0.00026 *best
+ep  54  val_mse=0.00023  best=0.00023 *best
+ep  55  val_mse=0.00021  best=0.00021 *best
+ep  60  val_mse=0.00038  best=0.00021
+ep  62  val_mse=0.00020  best=0.00020 *best
+ep  63  val_mse=0.00019  best=0.00019 *best
+ep  65  val_mse=0.00018  best=0.00018 *best
+ep  70  val_mse=0.00021  best=0.00018
+ep  72  val_mse=0.00018  best=0.00018 *best
+ep  75  val_mse=0.00019  best=0.00018
+ep  80  val_mse=0.00019  best=0.00018
+ep  81  val_mse=0.00017  best=0.00017 *best
+ep  83  val_mse=0.00017  best=0.00017 *best
+ep  84  val_mse=0.00016  best=0.00016 *best
+ep  85  val_mse=0.00019  best=0.00016
+ep  90  val_mse=0.00017  best=0.00016
+ep  95  val_mse=0.00017  best=0.00016
+# 조기종료 (val 0.00016)
+# 벤치마크 vs bot_strong (랜덤 60판, 학습 미사용 맵)...
+# vs_strong 승/무/패 = 26/0/34   승률 = 43.3%
+# 가중치 -> nnue_weights.txt  (val_mse=0.00016)

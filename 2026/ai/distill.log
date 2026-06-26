@@ -1,0 +1,21 @@
+# device=cuda  NVIDIA GeForce RTX 4070 Ti SUPER
+# 데이터 640,535 위치 생성  (297.4s)
+ep   1  val_mse=7.99540  best=7.99540 *best
+ep   2  val_mse=7.46756  best=7.46756 *best
+ep   3  val_mse=7.13993  best=7.13993 *best
+ep   4  val_mse=6.77306  best=6.77306 *best
+ep   5  val_mse=6.09424  best=6.09424 *best
+ep   6  val_mse=4.93545  best=4.93545 *best
+ep   7  val_mse=4.17306  best=4.17306 *best
+ep   8  val_mse=3.82902  best=3.82902 *best
+ep  10  val_mse=3.76985  best=3.76985 *best
+ep  11  val_mse=3.69667  best=3.69667 *best
+ep  12  val_mse=3.69034  best=3.69034 *best
+ep  13  val_mse=3.66478  best=3.66478 *best
+ep  15  val_mse=3.75879  best=3.66478
+ep  20  val_mse=3.89449  best=3.66478
+ep  25  val_mse=3.91682  best=3.66478
+# 조기종료 (val 3.66478)
+# 벤치마크 vs bot_strong (랜덤 200판, 학습 미사용 맵)...
+# vs_strong 승/무/패 = 119/6/75   승률 = 61.3%
+# 가중치 -> nnue_weights.txt  (val_mse=3.66478)
